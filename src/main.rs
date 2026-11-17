@@ -361,7 +361,11 @@ fn main() {
         let brush = value("--brush")
             .and_then(|s| s.parse::<usize>().ok())
             .filter(|i| *i < 10);
-        let bx = (logical_width - (logical_width - 96.).max(0.).min(676.)) / 2.;
+        let bx = (logical_width
+            - (logical_width - 96.)
+                .max(0.)
+                .min(portfolio::app::TOOLBAR_WIDTH))
+            / 2.;
         let shape_fill = has("--shape-fill");
         if shape_fill && (has("--eraser-panel") || has("--brush-panel") || brush.is_some()) {
             eprintln!(
@@ -605,7 +609,13 @@ fn main() {
             drag_panel(&mut app, x, 162., dx, dy);
         }
         if let Some((dx, dy)) = toolbar_offset {
-            drag_panel(&mut app, bx + 402., 104., dx, dy);
+            drag_panel(
+                &mut app,
+                bx + portfolio::app::TOOLBAR_GRIP_OFFSET + 10.,
+                104.,
+                dx,
+                dy,
+            );
         }
         let mut frame = app.render();
         for text in &mut frame.texts {

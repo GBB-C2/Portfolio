@@ -158,6 +158,8 @@ fn substitute(pattern: &str, values: &[String]) -> String {
 
 // Locale order: English, German, Korean, Simplified Chinese, Japanese.
 const CATALOG: &[(&str, [&str; 5])] = &[
+    ("Текст · пока недоступен", ["Text · not available yet", "Text · noch nicht verfügbar", "텍스트 · 아직 사용할 수 없음", "文字 · 暂不可用", "テキスト · 現在は使用できません"]),
+    ("Цвет · открыть палитру", ["Color · open palette", "Farbe · Palette öffnen", "색상 · 팔레트 열기", "颜色 · 打开调色板", "色 · パレットを開く"]),
     ("Кисть", ["Brush", "Pinsel", "브러시", "画笔", "ブラシ"]),
     ("Ластик", ["Eraser", "Radierer", "지우개", "橡皮擦", "消しゴム"]),
     ("Заливка", ["Fill", "Füllen", "채우기", "填充", "塗りつぶし"]),

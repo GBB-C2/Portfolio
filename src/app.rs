@@ -31,6 +31,9 @@ mod tool_properties_ui;
 use settings_ui::SettingsUi;
 use tool_properties_ui::ToolPropertiesUi;
 
+pub const TOOLBAR_WIDTH: f32 = 756.;
+pub const TOOLBAR_GRIP_OFFSET: f32 = 472.;
+
 const PALETTE: [u32; 8] = [
     0x242b25, 0xf1e9d2, 0xd84d38, 0x5d6a43, 0xc8aa69, 0x365ad7, 0xd3e98a, 0xc297a0,
 ];
@@ -443,7 +446,40 @@ impl PortfolioApp {
                 c.label = tip.into();
             }
         }
-        let x = bar.x + 144.;
+        self.icon_button(
+            p,
+            Rect::new(bar.x + 128., bar.y + 8., 36., 32.),
+            Action::NoOp,
+            "text",
+            "Текст · пока недоступен",
+            false,
+            false,
+        );
+        let color_button = Rect::new(bar.x + 168., bar.y + 8., 36., 32.);
+        let before = self.controls.len();
+        self.button(
+            p,
+            color_button,
+            Action::Inspector(false),
+            "",
+            None,
+            !self.inspector_layers,
+            true,
+            false,
+        );
+        if self.controls.len() > before {
+            if let Some(control) = self.controls.last_mut() {
+                control.label = "Цвет · открыть палитру".into();
+            }
+        }
+        let (cx, cy) = (
+            color_button.x + color_button.w * 0.5,
+            color_button.y + color_button.h * 0.5,
+        );
+        p.circle(cx, cy, 9., t.text, true);
+        p.circle(cx, cy, 7.5, rgb(self.brush.color), true);
+
+        let x = bar.x + 224.;
         p.rect(Rect::new(x - 9., bar.y + 14., 1., 20.), t.border);
         for (i, tool) in [Tool::Fill, Tool::Picker, Tool::Hand]
             .into_iter()
@@ -517,14 +553,14 @@ impl PortfolioApp {
         );
         for (offset, action, icon, label, enabled) in [
             (
-                412.,
+                492.,
                 Action::Undo,
                 "undo",
                 "Отменить · Ctrl+Z",
                 self.doc.can_undo(),
             ),
             (
-                448.,
+                528.,
                 Action::Redo,
                 "redo",
                 "Повторить · Ctrl+Shift+Z",
@@ -4088,7 +4124,7 @@ impl PortfolioApp {
         Rect::new(0., 64., self.w(), (self.h() - 64.).max(0.))
     }
     fn top_tools_rect(&self) -> Rect {
-        let width = (self.w() - 96.).max(0.).min(676.);
+        let width = (self.w() - 96.).max(0.).min(TOOLBAR_WIDTH);
         let position = self
             .toolbar_position
             .unwrap_or(((self.w() - width) / 2., 80.));
@@ -4097,7 +4133,7 @@ impl PortfolioApp {
     }
     fn toolbar_grip_rect(&self) -> Rect {
         let bar = self.top_tools_rect();
-        Rect::new(bar.x + 392., bar.y + 8., 20., 32.)
+        Rect::new(bar.x + TOOLBAR_GRIP_OFFSET, bar.y + 8., 20., 32.)
     }
     fn tool_family_rect(&self, family: ToolPanel) -> Rect {
         let index = match family {
