@@ -1,0 +1,51 @@
+{
+  "status": "passed",
+  "exact_configurations": 480,
+  "exact_checkpoints": 3960,
+  "document_tests": 33,
+  "scope": "Host release raster kernel only; no Windows runtime claim",
+  "source_after_sha256": "41e4fa4f05e43f9289e0de115ee0d00ac2ce65ff740992b595e318dfa575b0fa",
+  "checksums_equal": true,
+  "files": {
+    "README.md": {
+      "size_bytes": 4239,
+      "sha256": "8240f425a09c816c900327bcde635c3bf7afcbfb80006c48e20c92c1132bdbb5"
+    },
+    "core_evidence.zip": {
+      "size_bytes": 63603,
+      "sha256": "1fc09d17d51e111ee5a863b437c9dbfd13765030be036c17ffe59a20b231310e"
+    },
+    "document_before_stamp_optimization.rs": {
+      "size_bytes": 136951,
+      "sha256": "24015c3d0f9b701ca4d2618236474dd3afcf209cbca7ff6cab35dca12a6517b4"
+    },
+    "render_evidence.zip": {
+      "size_bytes": 143881,
+      "sha256": "d58200c8a9b0e03c7caabd1313876e99ab53a7087648a56328676466b84cbab3"
+    },
+    "shape_preview_timing.rs": {
+      "size_bytes": 2900,
+      "sha256": "a928f86677cd591102af4405d4cc9254386e182df48a159632a3fbfd3bcd61a3"
+    },
+    "shape_timing_after.csv": {
+      "size_bytes": 483,
+      "sha256": "0e9b91424b03e310b70e88e3c8a4afdb67184e53e24f38e972fc5b83e6f29689"
+    },
+    "shape_timing_before.csv": {
+      "size_bytes": 487,
+      "sha256": "d5387c0c0e38050bde003d4a64ed24171ed09a92b50087cc47499341a9bde5db"
+    },
+    "stamp_equivalence_gate.rs": {
+      "size_bytes": 4442,
+      "sha256": "277fd35281d1f08c8d234e57f65e8ae0bf72d9a0e735b9d3c3dbc8f08e43aa4e"
+    },
+    "stamp_pixels_after.csv": {
+      "size_bytes": 150645,
+      "sha256": "a4f25b7c1a45906438820e08503f80999e247c541591b63ef43246e8453264a7"
+    },
+    "stamp_pixels_before.csv": {
+      "size_bytes": 150645,
+      "sha256": "a4f25b7c1a45906438820e08503f80999e247c541591b63ef43246e8453264a7"
+    }
+  }
+}

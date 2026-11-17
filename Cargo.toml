@@ -1,0 +1,21 @@
+[package]
+name = "portfolio"
+version = "0.1.0"
+edition = "2021"
+description = "Portfolio — a native Rust painting studio for Windows"
+license = "MIT"
+
+[lib]
+name = "portfolio"
+path = "src/lib.rs"
+
+[[bin]]
+name = "Portfolio"
+path = "src/main.rs"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
+
+[dependencies]

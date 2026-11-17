@@ -1,0 +1,156 @@
+{
+  "binary_sha256": "da3a819d3d09b89a12e8c17c766cbb39ae831df38d69601c3645936e2b4aab86",
+  "valid_cases": 24,
+  "invalid_cases": 12,
+  "checks": [
+    {
+      "check": "24 valid CLI combinations exit 0",
+      "pass": true
+    },
+    {
+      "check": "12 invalid CLI combinations exit 2",
+      "pass": true
+    },
+    {
+      "check": "Eraser chooser has its own preset names",
+      "pass": true
+    },
+    {
+      "check": "Compact preset 9 selects Wide eraser",
+      "pass": true
+    },
+    {
+      "check": "Eraser category and new English name intersect",
+      "pass": true
+    },
+    {
+      "check": "Legacy eraser search remains supported",
+      "pass": true
+    },
+    {
+      "check": "Eraser current Japanese names are used",
+      "pass": true
+    },
+    {
+      "check": "Eraser properties and reset remain separate",
+      "pass": true
+    },
+    {
+      "check": "Basic section shows its own parameters",
+      "pass": true
+    },
+    {
+      "check": "Detail switches to Stamp parameters",
+      "pass": true
+    },
+    {
+      "check": "Brush Stamp selection still works",
+      "pass": true
+    },
+    {
+      "check": "eraser_basic has navigation left and parameter body right",
+      "pass": true
+    },
+    {
+      "check": "eraser_tip has navigation left and parameter body right",
+      "pass": true
+    },
+    {
+      "check": "eraser_tip_compact has navigation left and parameter body right",
+      "pass": true
+    },
+    {
+      "check": "Stamp scroll stays inside its selected section",
+      "pass": true
+    },
+    {
+      "check": "Basic scroll stays inside its selected section",
+      "pass": true
+    },
+    {
+      "check": "Toolbar moves by the requested logical delta",
+      "pass": true
+    },
+    {
+      "check": "Ordinary quick controls follow the toolbar",
+      "pass": true
+    },
+    {
+      "check": "Pinned chooser moves independently",
+      "pass": true
+    },
+    {
+      "check": "Pinned quick controls follow the chooser",
+      "pass": true
+    },
+    {
+      "check": "Both groups keep independent positions",
+      "pass": true
+    },
+    {
+      "check": "Compact toolbar clamps inside window",
+      "pass": true
+    },
+    {
+      "check": "Compact chooser clamps inside window",
+      "pass": true
+    },
+    {
+      "check": "Zero offset does not unpin or alter the frame",
+      "pass": true
+    },
+    {
+      "check": "Toolbar drag uses logical coordinates at DPI 150 percent",
+      "pass": true
+    },
+    {
+      "check": "Chooser drag uses logical coordinates at DPI 150 percent",
+      "pass": true
+    },
+    {
+      "check": "Properties and inspector survive moving both groups",
+      "pass": true
+    },
+    {
+      "check": "Bottom toolbar keeps an upward-opening unpinned chooser",
+      "pass": true
+    },
+    {
+      "check": "Panel drag after a quick preview retains its value and moves the toolbar",
+      "pass": true
+    },
+    {
+      "check": "shape_fill opens Fill section and enables its real switch",
+      "pass": true
+    },
+    {
+      "check": "shape_fill_compact opens Fill section and enables its real switch",
+      "pass": true
+    }
+  ],
+  "shape_switch_pixels": {
+    "shape_fill": {
+      "point": [
+        430,
+        404
+      ],
+      "rgb": [
+        160,
+        142,
+        226
+      ]
+    },
+    "shape_fill_compact": {
+      "point": [
+        430,
+        404
+      ],
+      "rgb": [
+        93,
+        59,
+        176
+      ]
+    }
+  },
+  "native_windows_runtime_measured": false
+}

@@ -1,0 +1,88 @@
+{
+  "exe": "/workspace/scratch/c647e3b64d9b/portfolio/Portfolio.exe",
+  "build_exe": "/workspace/scratch/c647e3b64d9b/toolchain/windows-gnu-release/x86_64-pc-windows-gnu/release/Portfolio.exe",
+  "size_bytes": 3120640,
+  "sha256": "71d83b679f61c571e745900c6c9499721d706e29e7fea54befe9c81b26764654",
+  "format": "PE32+",
+  "machine": "x86_64",
+  "subsystem": "Windows GUI",
+  "aslr": true,
+  "high_entropy_va": true,
+  "nx": true,
+  "resources": {
+    "3": 9,
+    "14": 1,
+    "16": 1,
+    "24": 1
+  },
+  "manifest_matches_source": true,
+  "manifest": "<?xml version=\"1.0\" encoding=\"UTF-8\" standalone=\"yes\"?>\n<assembly xmlns=\"urn:schemas-microsoft-com:asm.v1\" manifestVersion=\"1.0\">\n  <assemblyIdentity version=\"0.1.0.0\" processorArchitecture=\"amd64\"\n                    name=\"Portfolio.Studio\" type=\"win32\"/>\n  <description>Portfolio — 2D painting studio</description>\n  <trustInfo xmlns=\"urn:schemas-microsoft-com:asm.v3\">\n    <security>\n      <requestedPrivileges>\n        <requestedExecutionLevel level=\"asInvoker\" uiAccess=\"false\"/>\n      </requestedPrivileges>\n    </security>\n  </trustInfo>\n  <compatibility xmlns=\"urn:schemas-microsoft-com:compatibility.v1\">\n    <application>\n      <supportedOS Id=\"{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}\"/>\n    </application>\n  </compatibility>\n  <application xmlns=\"urn:schemas-microsoft-com:asm.v3\">\n    <windowsSettings>\n      <dpiAware xmlns=\"http://schemas.microsoft.com/SMI/2005/WindowsSettings\">true/pm</dpiAware>\n      <dpiAwareness xmlns=\"http://schemas.microsoft.com/SMI/2016/WindowsSettings\">PerMonitorV2</dpiAwareness>\n      <longPathAware xmlns=\"http://schemas.microsoft.com/SMI/2016/WindowsSettings\">true</longPathAware>\n    </windowsSettings>\n  </application>\n  <dependency>\n    <dependentAssembly>\n      <assemblyIdentity type=\"win32\" name=\"Microsoft.Windows.Common-Controls\" version=\"6.0.0.0\"\n                        processorArchitecture=\"*\" publicKeyToken=\"6595b64144ccf1df\" language=\"*\"/>\n    </dependentAssembly>\n  </dependency>\n</assembly>\n",
+  "imports": [
+    "comdlg32.dll",
+    "dwmapi.dll",
+    "GDI32.dll",
+    "gdiplus.dll",
+    "KERNEL32.dll",
+    "msvcrt.dll",
+    "ntdll.dll",
+    "SHELL32.dll",
+    "api-ms-win-core-synch-l1-2-0.dll",
+    "USER32.dll",
+    "bcryptprimitives.dll"
+  ],
+  "only_system_dlls": true,
+  "embedded_fonts": [
+    {
+      "name": "CozetteVector.ttf",
+      "bytes": 649328,
+      "sha256": "2d54a586f824f32d9d2dd01ec3b990c2a4d6445efa77e20177efe382ebe51627",
+      "embedded": true,
+      "section": ".rdata",
+      "offset": 1704800
+    },
+    {
+      "name": "CozetteVectorBold.ttf",
+      "bytes": 567916,
+      "sha256": "9f113791362001d53cd4c09cbe91f9125c050ca7aab49d48393601e79b2b1d41",
+      "embedded": true,
+      "section": ".rdata",
+      "offset": 2436924
+    },
+    {
+      "name": "ProggyClean.ttf",
+      "bytes": 41208,
+      "sha256": "527d2a443ce051f93f7e77b855609722b8cb220a9f104b4aa037be5c90b71324",
+      "embedded": true,
+      "section": ".rdata",
+      "offset": 2354128
+    },
+    {
+      "name": "ProggyForever.ttf",
+      "bytes": 20020,
+      "sha256": "56864f00513974a481a9db1a996dc100657fca0faeef76e60aa59c6a0cf5b1b6",
+      "embedded": true,
+      "section": ".rdata",
+      "offset": 1684780
+    },
+    {
+      "name": "ProggySquare.ttf",
+      "bytes": 41588,
+      "sha256": "fb225bb94459bae14eeff4a953f549e0312bb0d396d1794cacd9d1483db12cef",
+      "embedded": true,
+      "section": ".rdata",
+      "offset": 2395336
+    }
+  ],
+  "checks": {
+    "msvc_metadata": "passed",
+    "gnu_release": "passed",
+    "msvc_warning": "Optional rc.exe unavailable; GNU release contains all native resources.",
+    "copied_exe_sha256_matches": true
+  },
+  "working_directory": "/workspace/scratch/c647e3b64d9b/portfolio",
+  "build_commands": {
+    "msvc_metadata": "env RUSTUP_HOME=/workspace/scratch/c647e3b64d9b/toolchain/rustup CARGO_HOME=/workspace/scratch/c647e3b64d9b/toolchain/cargo TMPDIR=/workspace/scratch/c647e3b64d9b/toolchain/tmp CARGO_TARGET_DIR=/workspace/scratch/c647e3b64d9b/toolchain/windows-msvc-check /workspace/scratch/c647e3b64d9b/toolchain/cargo/bin/cargo check --target x86_64-pc-windows-msvc",
+    "gnu_release": "env RUSTUP_HOME=/workspace/scratch/c647e3b64d9b/toolchain/rustup CARGO_HOME=/workspace/scratch/c647e3b64d9b/toolchain/cargo TMPDIR=/workspace/scratch/c647e3b64d9b/toolchain/tmp CARGO_TARGET_DIR=/workspace/scratch/c647e3b64d9b/toolchain/windows-gnu-release WINDRES=/workspace/scratch/c647e3b64d9b/toolchain/mingw/usr/bin/x86_64-w64-mingw32-windres CARGO_TARGET_X86_64_PC_WINDOWS_GNU_LINKER=/workspace/scratch/c647e3b64d9b/toolchain/mingw/usr/bin/x86_64-w64-mingw32-gcc-win32 /workspace/scratch/c647e3b64d9b/toolchain/cargo/bin/cargo build --release --target x86_64-pc-windows-gnu"
+  },
+  "native_runtime_tested": false
+}

@@ -1,0 +1,152 @@
+Command: cargo test --target-dir target/ui_regression
+
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 2.36s
+     Running unittests src/lib.rs (target/ui_regression/debug/build/portfolio/dbea8e9bc23a78f9/out/portfolio-dbea8e9bc23a78f9)
+
+running 112 tests
+test app::tests::appearance_preferences_roundtrip_and_migrate_legacy_theme_files ... ok
+test app::tests::an_older_save_completion_never_quits_or_marks_newer_edits_saved ... ok
+test app::settings_ui::tests::settings_search_matches_groups_localized_fields_and_all_tokens ... ok
+test app::settings_ui::tests::settings_scroll_reveals_offscreen_fields_and_filters_focus_order ... ok
+test app::tests::a_focused_layer_opacity_control_cannot_mutate_a_document_during_a_write ... ok
+test app::tests::a_stroke_stops_at_a_floating_panel_and_never_bridges_when_the_pointer_returns ... ok
+test app::tests::animated_panel_focus_survives_clipping_and_transitions_do_not_paint_through ... ok
+test app::tests::browser_search_edits_unicode_and_clipboard_without_leaking_tool_shortcuts ... ok
+test app::tests::browser_filter_intersects_categories_and_invalidates_stale_card_hits ... ok
+test app::tests::brand_menu_toolbar_history_and_layers_are_reachable_in_a_compact_window ... ok
+test app::tests::closing_font_list_blocks_double_clicks_but_restores_keyboard_focus_immediately ... ok
+test app::tests::disconnected_workers_release_busy_state_and_unchanged_recovery_is_not_rewritten ... ok
+test app::tests::browser_wheel_scrolls_two_clipped_rows_continuously_without_changing_art_or_view ... ok
+test app::tests::cached_canvas_matches_fresh_pixels_after_edits_and_view_changes ... ok
+test app::tests::browser_clicks_select_on_release_but_dragging_either_row_never_selects_or_paints ... ok
+test app::tests::image_import_reports_one_summary_preserves_order_and_resets_the_next_batch ... ok
+test app::tests::browser_search_toggle_replaces_categories_and_fixed_all_survives_scrolling ... ok
+test app::tests::brush_eraser_and_shape_choices_keep_their_own_settings_without_editing_art ... ok
+test app::tests::contextual_gears_live_below_chooser_pin_and_keep_the_active_family ... ok
+test app::tests::keyboard_popover_focus_and_space_release_leave_the_next_canvas_gesture_painting ... ok
+test app::tests::extended_brush_scrolling_and_stamp_settings_keep_separate_paint_and_eraser_presets ... ok
+test app::tests::eraser_has_its_own_catalogue_presets_and_true_erasing_samples ... ok
+test app::tests::movable_panels_clamp_with_resize_and_support_keyboard_and_independent_resets ... ok
+test app::tests::font_size_is_live_persisted_and_cancellable_without_editing_the_art ... ok
+test app::tests::browser_cancel_restores_only_the_dragged_scroll_and_ignores_late_release ... ok
+test app::tests::postponing_recovery_preserves_the_old_file_through_cleanup_and_a_new_manual_save ... ok
+test app::tests::live_appearance_changes_preserve_art_and_outside_dismissal_does_not_paint ... ok
+test app::tests::moving_toolbar_translates_its_controls_and_anchor_while_pinned_chooser_moves_independently ... ok
+test app::tests::quick_opacity_preview_renders_live_color_and_disappears_on_release ... ok
+test app::tests::last_rendered_quick_preview_blocks_input_until_its_hidden_frame_is_drawn ... ok
+test app::tests::live_thick_translucent_mirrored_shapes_match_release_pixels_and_are_one_undo ... ok
+test app::tests::quick_sliders_hide_for_unpinned_chooser_but_coexist_with_properties_and_ghosts_block_wheel ... ok
+test app::tests::recovery_waits_for_idle_and_only_a_successful_background_decode_replaces_art ... ok
+test app::tests::panel_drag_interruptions_restore_default_or_custom_positions_without_canvas_leaks ... ok
+test app::tests::quick_cards_have_separate_surfaces_and_unlabelled_values_to_the_right_of_tracks ... ok
+test app::tests::pinned_chooser_is_centered_above_quick_cards_follows_tools_and_allows_canvas_painting ... ok
+test app::tests::selecting_a_nonproperty_tool_or_opening_settings_does_not_resurrect_an_old_chooser ... ok
+test app::tests::cancelling_live_shapes_restores_art_and_cached_canvas_without_creating_history ... ok
+test app::tests::stale_autosave_is_removed_without_consuming_the_manual_writer_or_current_art ... ok
+test app::tests::selection_dropdowns_commit_only_on_activation_and_consume_outside_clicks ... ok
+test app::tests::switching_from_a_closing_chooser_keeps_settings_visible_and_reduced_motion_snaps ... ok
+test app::tests::settings_sections_stay_expanded_and_search_filters_a_scrollable_compact_panel ... ok
+test app::tests::modeless_tool_properties_share_input_with_chooser_quick_controls_inspector_and_canvas ... ok
+test app::tests::ten_fonts_and_six_languages_are_reachable_and_preserve_user_names ... ok
+test app::tests::toolbar_and_inspector_absorb_input_and_tab_preserves_the_full_viewport ... ok
+test document::tests::a_stroke_is_one_undo_step_and_saved_revision_tracks_undo ... ok
+test document::tests::all_ten_brushes_are_distinct_deterministic_and_eraser_compatible ... ok
+test document::tests::atomic_write_can_replace_existing_file ... ok
+test document::tests::bmp_topdown_and_bottomup_decode_to_identical_pixels ... ok
+test document::tests::brush_parameters_change_deposition_geometry_and_sanitize_nonfinite_values ... ok
+test document::tests::cached_stamp_alpha_and_reflected_bounds_match_full_mask_reference ... ok
+test document::tests::cancel_restores_layer_pixels_and_noop_creates_no_history ... ok
+test document::tests::closed_shapes_fill_the_center_with_opacity_flow_and_source_alpha ... ok
+test document::tests::delete_reorder_and_duplicate_restore_correct_active_layer ... ok
+test document::tests::directional_and_grained_brushes_mirror_their_actual_nib ... ok
+test document::tests::edge_tiles_and_combined_layer_edits_roundtrip ... ok
+test document::tests::enclosed_fill_records_only_touched_tiles_and_cancels_inside_metadata_edit ... ok
+test document::tests::extreme_pointer_segments_are_visible_clipped_and_have_a_fixed_work_budget ... ok
+test document::tests::fill_respects_a_boundary_and_locked_layer ... ok
+test document::tests::fill_scanlines_antialias_clip_and_accept_reversed_or_extreme_endpoints ... ok
+test document::tests::filled_preview_replaces_outline_and_commits_exactly_one_reversible_edit ... ok
+test document::tests::filled_shape_guards_noop_alpha_and_line_fill_flag ... ok
+test document::tests::filled_shape_mirror_reflects_the_same_fractional_coverage_and_contour ... ok
+test document::tests::layer_metadata_gestures_reuse_pixels_and_cancel_or_commit_once ... ok
+test document::tests::live_shape_damage_restores_old_geometry_and_cancel_preserves_redo ... ok
+test document::tests::live_shape_invalid_update_is_atomic_and_empty_preview_is_not_history ... ok
+test document::tests::live_shape_never_takes_or_cancels_an_unrelated_pending_edit ... ok
+test document::tests::live_shape_reuses_mask_and_tile_storage_without_accumulating_visited_regions ... ok
+test app::tests::tool_family_popovers_toggle_switch_and_consume_dismissal_before_painting ... ok
+test document::tests::malformed_import_and_layer_buffers_do_not_partially_change_the_document ... ok
+test document::tests::malformed_project_is_rejected_without_large_allocation ... ok
+test document::tests::metadata_transactions_promote_without_losing_order_pixels_or_original_state ... ok
+test document::tests::optimized_blending_matches_straight_alpha_reference ... ok
+test document::tests::paint_damage_recomposes_exactly_and_cancel_reports_restored_tiles ... ok
+test document::tests::png_has_valid_chunks_checksums_and_deflate_data ... ok
+test document::tests::project_roundtrip_preserves_layers_and_unicode ... ok
+test document::tests::raster_edit_captures_only_touched_tiles_and_promotes_for_general_operations ... ok
+test document::tests::span_fill_matches_reference_for_tolerance_alpha_edges_and_undo ... ok
+test document::tests::straight_alpha_and_layer_opacity_compose_correctly ... ok
+test document::tests::structural_layer_commands_preserve_unrelated_buffers_and_exact_history ... ok
+test document::tests::symmetry_and_erase_are_one_reversible_edit ... ok
+test document::tests::tile_history_keeps_forty_strokes_without_copying_every_layer ... ok
+test document::tests::writer_snapshots_are_independent_and_exclude_history_and_pending_edits ... ok
+test i18n::tests::catalogue_entries_are_complete_and_unique ... ok
+test i18n::tests::file_filters_preserve_nul_delimiters_and_extensions ... ok
+test i18n::tests::language_keys_and_native_names_roundtrip ... ok
+test i18n::tests::templates_preserve_every_interpolated_value_once ... ok
+test i18n::tests::unknown_text_paths_and_inserted_braces_are_preserved ... ok
+test motion::tests::reduced_motion_snap_is_final ... ok
+test motion::tests::reveal_finishes_and_reversal_is_continuous ... ok
+test platform::frame_cache::tests::dynamic_labels_cannot_grow_the_font_cache_without_bound ... ok
+test platform::frame_cache::tests::glyph_decisions_keep_text_size_and_regional_script_separate ... ok
+test platform::frame_cache::tests::long_render_does_not_add_another_idle_frame_interval ... ok
+test platform::frame_cache::tests::requests_coalesce_without_postponing_the_due_frame ... ok
+test platform::native_contract_tests::frame_budget_preserves_normal_and_8k_sizes ... ok
+test platform::native_contract_tests::script_selection_handles_language_names_and_regional_han ... ok
+test render::tests::achromatic_color_remembers_hue ... ok
+test render::tests::hex_and_hsv_stay_consistent ... ok
+test tool_browser::tests::family_state_and_category_scroll_survive_filter_changes ... ok
+test tool_browser::tests::filtering_combines_category_tokens_and_current_locale ... ok
+test tool_browser::tests::scroll_clamps_drag_wheel_resize_and_visibility ... ok
+test tool_browser::tests::search_edits_utf8_without_splitting_scalars ... ok
+test tool_browser::tests::search_limit_counts_scalars_and_selection_frees_capacity ... ok
+test tool_browser::tests::word_navigation_and_shift_selection_use_safe_byte_offsets ... ok
+test app::tests::shape_fill_checkbox_drives_exact_live_raster_and_line_remains_outline_only ... ok
+test app::tests::quick_sliders_are_centered_live_cancellable_and_preserve_the_document ... ok
+test document::tests::live_shapes_match_committed_raster_at_large_sizes_alpha_texture_and_mirror ... ok
+test app::tests::transient_quick_preview_handles_exact_input_keyboard_expiry_and_other_gestures ... ok
+test app::tests::properties_coexist_with_the_chooser_and_preserve_its_view_when_explicitly_closed ... ok
+test app::tests::quick_preview_gestures_end_or_rollback_without_leaking_pointer_events_to_art ... ok
+test app::tests::size_previews_are_only_outlines_for_brush_eraser_and_all_shapes ... ok
+test app::tests::tool_properties_sections_reveal_only_their_parameters_and_preserve_independent_scroll ... ok
+
+test result: ok. 112 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 19.16s
+
+     Running unittests src/main.rs (target/ui_regression/debug/build/portfolio/060b54e44222cc04/out/Portfolio-060b54e44222cc04)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+     Running tests/workflows.rs (target/ui_regression/debug/build/portfolio/5928b7a755a26098/out/workflows-5928b7a755a26098)
+
+running 12 tests
+test mirror_shortcut_paints_both_sides_in_one_undo_step ... ok
+test a_pointer_gesture_is_one_edit_and_shortcuts_undo_and_redo_it ... ok
+test creating_a_canvas_provides_paper_and_one_empty_painting_layer ... ok
+test quick_size_readout_edits_the_tool_without_opening_properties_or_changing_art ... ok
+test the_click_dismissing_a_menu_does_not_paint_under_it ... ok
+test escape_capture_loss_and_focus_loss_restore_an_unfinished_stroke ... ok
+test saving_then_opening_uses_the_correct_file_dialog_intention ... ok
+test a_dirty_document_is_protected_when_new_is_requested ... ok
+test layer_opacity_drag_is_one_metadata_edit_and_interruptions_restore_it ... ok
+test canceled_and_invalid_color_and_numeric_prompts_keep_existing_values ... ok
+test value_view_changes_the_preview_but_preserves_color_export ... ok
+test switching_theme_keeps_the_document_tool_and_view ... ok
+
+test result: ok. 12 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.15s
+
+   Doc-tests portfolio
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+
+

@@ -1,0 +1,50 @@
+[
+  {
+    "file": "ProggyForever.ttf",
+    "url": "https://raw.githubusercontent.com/ocornut/proggyforever/f8868ba43bb42c4d88454d03ad81cbd139789f72/ProggyForever-Regular.ttf",
+    "bytes": 20020,
+    "sha256": "56864f00513974a481a9db1a996dc100657fca0faeef76e60aa59c6a0cf5b1b6"
+  },
+  {
+    "file": "LICENSE-ProggyForever.txt",
+    "url": "https://raw.githubusercontent.com/ocornut/proggyforever/f8868ba43bb42c4d88454d03ad81cbd139789f72/LICENSE.txt",
+    "bytes": 1118,
+    "sha256": "47d329848d81b5ad777bf5eca73509a4d1b730d6e2ca917f03e72010b2f59576"
+  },
+  {
+    "file": "ProggyClean.ttf",
+    "url": "https://raw.githubusercontent.com/bluescan/proggyfonts/139ec08a38096161291792313ef5803fc4f0e37b/ProggyOriginal/ProggyClean.ttf",
+    "bytes": 41208,
+    "sha256": "527d2a443ce051f93f7e77b855609722b8cb220a9f104b4aa037be5c90b71324"
+  },
+  {
+    "file": "ProggySquare.ttf",
+    "url": "https://raw.githubusercontent.com/bluescan/proggyfonts/139ec08a38096161291792313ef5803fc4f0e37b/ProggyOriginal/ProggySquare.ttf",
+    "bytes": 41588,
+    "sha256": "fb225bb94459bae14eeff4a953f549e0312bb0d396d1794cacd9d1483db12cef"
+  },
+  {
+    "file": "LICENSE-ProggyOriginal.txt",
+    "url": "https://raw.githubusercontent.com/bluescan/proggyfonts/139ec08a38096161291792313ef5803fc4f0e37b/LICENSE",
+    "bytes": 1078,
+    "sha256": "fe61d069df303c697e04200f5f8232c2cb09dd3572f4357b323469f7d592d142"
+  },
+  {
+    "file": "CozetteVector.ttf",
+    "url": "https://github.com/the-moonwitch/Cozette/releases/download/v.1.30.0/CozetteVector.ttf",
+    "bytes": 649328,
+    "sha256": "2d54a586f824f32d9d2dd01ec3b990c2a4d6445efa77e20177efe382ebe51627"
+  },
+  {
+    "file": "CozetteVectorBold.ttf",
+    "url": "https://github.com/the-moonwitch/Cozette/releases/download/v.1.30.0/CozetteVectorBold.ttf",
+    "bytes": 567916,
+    "sha256": "9f113791362001d53cd4c09cbe91f9125c050ca7aab49d48393601e79b2b1d41"
+  },
+  {
+    "file": "LICENSE-Cozette.txt",
+    "url": "https://github.com/the-moonwitch/Cozette/releases/download/v.1.30.0/LICENSE",
+    "bytes": 1080,
+    "sha256": "5d7f0dad37ceef2dc1e9c23e85fbf18629c4eaffe9a919fa4f5b618b46766d23"
+  }
+]
