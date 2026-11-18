@@ -69,12 +69,12 @@ pub enum Event {
     },
     Text(String),
     Paste(String),
-    TextLayerEdited {
-        document: u64,
-        target: Option<u64>,
-        text: TextLayer,
-        pixels: Vec<Color>,
+    CanvasTextChanged {
+        session: u64,
+        body: String,
     },
+    FinishCanvasText(bool),
+    FocusTextSettings,
     FocusLost,
     CaptureLost,
     /// OS accessibility preference; true disables nonessential transitions.
@@ -123,13 +123,7 @@ pub enum Effect {
         message: String,
         error: bool,
     },
-    EditTextLayer {
-        document: u64,
-        target: Option<u64>,
-        width: u32,
-        height: u32,
-        text: TextLayer,
-    },
+    FocusCanvasText,
     CopyText(String),
     PasteText,
     Quit,
@@ -271,7 +265,21 @@ pub struct Frame {
     pub texts: Vec<TextRun>,
 }
 
+/// Placement in physical client pixels. Exclusions keep floating panels above the editor.
+#[derive(Clone, Debug, PartialEq)]
+pub struct CanvasEditView {
+    pub session: u64,
+    pub text: TextLayer,
+    pub anchor: (i32, i32),
+    pub font_px: i32,
+    pub clip: [i32; 4],
+    pub panels: Vec<[i32; 4]>,
+}
+
 pub trait NativeApp {
+    fn canvas_editor(&self) -> Option<CanvasEditView> {
+        None
+    }
     /// The currently selected UI family also applies to application-owned
     /// native input dialogs. OS-owned common dialogs keep Windows typography.
     fn ui_font(&self) -> UiFont {
@@ -368,7 +376,17 @@ pub struct ImportedImage {
 #[cfg(target_os = "windows")]
 mod windows;
 #[cfg(target_os = "windows")]
-pub use windows::{load_image, run};
+pub use windows::{load_image, rasterize_text, run};
+
+#[cfg(not(target_os = "windows"))]
+pub fn rasterize_text(
+    _: &TextLayer,
+    _: u32,
+    _: u32,
+    _: crate::i18n::Language,
+) -> Result<Vec<Color>, String> {
+    Err("Для вывода шрифтов требуется Windows.".into())
+}
 
 #[cfg(not(target_os = "windows"))]
 pub fn run(_app: Box<dyn NativeApp>) -> Result<(), String> {

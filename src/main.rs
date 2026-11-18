@@ -360,11 +360,8 @@ fn main() {
         let brush = value("--brush")
             .and_then(|s| s.parse::<usize>().ok())
             .filter(|i| *i < 10);
-        let bx = (logical_width
-            - (logical_width - 96.)
-                .max(0.)
-                .min(portfolio::app::TOOLBAR_WIDTH))
-            / 2.;
+        let bw = (logical_width - 96.).clamp(0., portfolio::app::TOOLBAR_WIDTH);
+        let bx = (logical_width - bw) / 2.;
         let shape_fill = has("--shape-fill");
         if shape_fill && (has("--eraser-panel") || has("--brush-panel") || brush.is_some()) {
             eprintln!(
@@ -594,6 +591,10 @@ fn main() {
             });
             // Keep the real slider drag active through the final render.
         }
+        if has("--text-panel") {
+            key(&mut app, 84, false);
+            app.render();
+        }
         // Finish layout previews with real gestures after the initial controls
         // have been addressed at their default positions. The groups move
         // independently: first the pinned chooser, then the main toolbar.
@@ -610,7 +611,7 @@ fn main() {
         if let Some((dx, dy)) = toolbar_offset {
             drag_panel(
                 &mut app,
-                bx + portfolio::app::TOOLBAR_GRIP_OFFSET + 10.,
+                bx + bw - portfolio::app::TOOLBAR_GRIP_END + 10.,
                 104.,
                 dx,
                 dy,

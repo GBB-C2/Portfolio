@@ -2431,9 +2431,13 @@ impl Document {
     }
 
     pub fn composite_into(&self, output: &mut [Color]) {
+        self.composite_into_except(output, None);
+    }
+
+    pub(crate) fn composite_into_except(&self, output: &mut [Color], hidden: Option<u64>) {
         output.fill(Color::TRANSPARENT);
         for layer in &self.layers {
-            if !layer.visible || layer.opacity == 0 {
+            if !layer.visible || layer.opacity == 0 || hidden == Some(layer.id) {
                 continue;
             }
             for (dst, &src) in output.iter_mut().zip(layer.pixels.iter()) {

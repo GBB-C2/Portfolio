@@ -28,6 +28,10 @@ mod tests;
 mod brush_presets;
 use brush_presets::Presets;
 
+#[path = "canvas_text_ui.rs"]
+mod canvas_text_ui;
+use canvas_text_ui::TextDraft;
+
 #[path = "settings_ui.rs"]
 mod settings_ui;
 #[path = "tool_properties_ui.rs"]
@@ -36,10 +40,18 @@ use settings_ui::SettingsUi;
 use tool_properties_ui::ToolPropertiesUi;
 
 pub const TOOLBAR_WIDTH: f32 = 756.;
-pub const TOOLBAR_GRIP_OFFSET: f32 = 472.;
+pub const TOOLBAR_GRIP_END: f32 = 28.;
 
+const DEFAULT_INK: u32 = 0x365ad7;
 const PALETTE: [u32; 8] = [
-    0x242b25, 0xf1e9d2, 0xd84d38, 0x5d6a43, 0xc8aa69, 0x365ad7, 0xd3e98a, 0xc297a0,
+    0x242b25,
+    0xf1e9d2,
+    0xd84d38,
+    0x5d6a43,
+    0xc8aa69,
+    DEFAULT_INK,
+    0xd3e98a,
+    0xc297a0,
 ];
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Tool {
@@ -178,17 +190,19 @@ impl PortfolioApp {
             grayscale: self.grayscale,
         };
         let damage = self.doc.take_paint_damage();
+        let hidden = self.draft.as_ref().and_then(|draft| draft.target);
         let raster_changed = self.composite_dirty
             || damage.is_some()
             || self.composite.len() != (self.doc.width * self.doc.height) as usize;
         if self.composite_dirty
+            || (damage.is_some() && hidden.is_some())
             || self.composite.len() != (self.doc.width * self.doc.height) as usize
         {
             self.composite.resize(
                 (self.doc.width * self.doc.height) as usize,
                 Color::TRANSPARENT,
             );
-            self.doc.composite_into(&mut self.composite);
+            self.doc.composite_into_except(&mut self.composite, hidden);
             self.composite_dirty = false;
         } else if let Some(bounds) = damage {
             if !self.doc.composite_region_into(&mut self.composite, bounds) {
@@ -378,13 +392,20 @@ impl PortfolioApp {
             self.begin_reveal(p, self.right_panel_rect(), 0);
             self.draw_panel(p);
             self.end_reveal(p);
-            self.begin_reveal(p, self.top_tools_rect(), 0);
-            self.draw_top_tools(p);
-            self.end_reveal(p);
-            if self.quick_controls_visible() {
+            // Keep the grip accessible if a pinned quick row is dragged over the toolbar.
+            let quick = self.quick_controls_visible();
+            let toolbar_on_top =
+                quick && self.top_tools_rect().intersects(self.quick_controls_rect());
+            if !toolbar_on_top {
+                self.draw_toolbar_surface(p);
+            }
+            if quick {
                 self.begin_reveal(p, self.quick_controls_rect(), 0);
                 self.draw_quick_controls(p);
                 self.end_reveal(p);
+            }
+            if toolbar_on_top {
+                self.draw_toolbar_surface(p);
             }
             self.focused_mode = hidden;
             if hidden {
@@ -425,6 +446,12 @@ impl PortfolioApp {
             self.draw_quick_preview(p, action);
         }
     }
+    fn draw_toolbar_surface(&mut self, p: &mut Painter) {
+        self.begin_reveal(p, self.top_tools_rect(), 0);
+        self.draw_top_tools(p);
+        self.end_reveal(p);
+    }
+
     fn draw_top_tools(&mut self, p: &mut Painter) {
         let t = Theme::with_accent(self.dark, self.accent);
         let bar = self.top_tools_rect();
@@ -535,46 +562,16 @@ impl PortfolioApp {
                 true,
             );
         }
-        let grip = self.toolbar_grip_rect();
-        let grip_active = self.hover == Some(self.controls.len())
-            || self.focus == Some(self.controls.len())
-            || matches!(
-                self.drag,
-                Drag::Panel {
-                    kind: PanelKind::Toolbar,
-                    ..
-                }
-            );
-        if grip_active {
-            p.rounded(grip, 4., t.raised);
-        }
-        for row in 0..3 {
-            for col in 0..2 {
-                p.circle(
-                    grip.x + 7. + col as f32 * 6.,
-                    grip.y + 10. + row as f32 * 6.,
-                    1.25,
-                    if grip_active { t.accent } else { t.muted },
-                    true,
-                );
-            }
-        }
-        self.control(
-            grip,
-            Action::MoveToolbar,
-            "Переместить панель · стрелки / Home",
-            true,
-        );
         for (offset, action, icon, label, enabled) in [
             (
-                492.,
+                472.,
                 Action::Undo,
                 "undo",
                 "Отменить · Ctrl+Z",
                 self.doc.can_undo(),
             ),
             (
-                528.,
+                508.,
                 Action::Redo,
                 "redo",
                 "Повторить · Ctrl+Shift+Z",
@@ -591,7 +588,7 @@ impl PortfolioApp {
                 enabled,
             );
         }
-        let ux = bar.x + bar.w - 168.;
+        let ux = bar.x + bar.w - 196.;
         p.rect(Rect::new(ux - 9., bar.y + 14., 1., 20.), t.border);
         self.icon_button(
             p,
@@ -630,6 +627,15 @@ impl PortfolioApp {
             Action::Fit,
             "fit",
             "Вписать холст · 0",
+            false,
+            true,
+        );
+        self.icon_button(
+            p,
+            self.toolbar_grip_rect(),
+            Action::MoveToolbar,
+            "grip",
+            "Переместить панель · стрелки / Home",
             false,
             true,
         );
@@ -810,11 +816,7 @@ impl PortfolioApp {
             p,
             Rect::new(r.x + r.w - 36., r.y + 12., 28., 28.),
             Action::PinToolPanel,
-            if self.tool_panel_pinned {
-                "pin_active"
-            } else {
-                "pin"
-            },
+            "grip",
             if self.tool_panel_pinned {
                 "Перетащить панель · щелчок — открепить"
             } else {
@@ -1223,14 +1225,14 @@ impl PortfolioApp {
                 "Цвет: стрелки меняют насыщенность и яркость",
                 true,
             );
-            let hue = Rect::new(sx, yy(485.), sw, 10.);
-            for i in 0..sw as i32 {
+            let hue = Rect::new(sx, yy(485.), sw - 34., 10.);
+            for i in 0..hue.w as i32 {
                 p.rect(
                     Rect::new(sx + i as f32, hue.y, 1., 10.),
-                    rgb(hsv(i as f32 / sw * 360., 1., 1.)),
+                    rgb(hsv(i as f32 / hue.w * 360., 1., 1.)),
                 );
             }
-            let hx = sx + self.color_h / 360. * sw;
+            let hx = sx + self.color_h / 360. * hue.w;
             p.rounded(Rect::new(hx - 3., hue.y - 3., 6., 16.), 3., 0xf6f6f6);
             p.rounded(
                 Rect::new(hx - 1., hue.y - 1., 2., 12.),
@@ -1241,6 +1243,13 @@ impl PortfolioApp {
                 Rect::new(hue.x, hue.y - 4., hue.w, hue.h + 8.),
                 Action::Hue,
                 "Оттенок: стрелки меняют значение",
+                true,
+            );
+            self.slider_reset_button(
+                p,
+                Rect::new(sx + sw - 24., hue.y - 7., 24., 24.),
+                Slider::Hue,
+                "Оттенок",
                 true,
             );
             for (i, c) in PALETTE.iter().enumerate() {
@@ -1676,6 +1685,7 @@ enum Action {
     SettingsSection(u8),
     SetLanguage(Language),
     FontSize,
+    TextSize,
     SetAnimations(bool),
     Inspector(bool),
     BrowserSearch,
@@ -1688,6 +1698,7 @@ enum Action {
     #[allow(dead_code)] // Programmatic jump to the vertical stamp section.
     BrushDetail(bool),
     ResetBrush,
+    ResetSlider(Slider),
     RenameBrush,
     AddBrush,
     Roundness,
@@ -1726,6 +1737,16 @@ enum Action {
     AddLayer,
     Layer(usize),
     EditTextLayer(u64),
+    NewText,
+    ApplyText,
+    CancelText,
+    TextFont(bool),
+    TextBold,
+    TextItalic,
+    TextAlign(ParagraphAlign),
+    TextColor,
+    TextX,
+    TextY,
     Visible(usize),
     Lock(usize),
     LayerOpacity,
@@ -1739,6 +1760,60 @@ enum Action {
     NewHeight,
     Create,
     Cancel,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Slider {
+    Size,
+    Opacity,
+    Hardness,
+    Flow,
+    Spacing,
+    Angle,
+    Roundness,
+    Grain,
+    Scatter,
+    FontSize,
+    TextSize,
+    LayerOpacity,
+    Hue,
+}
+impl Slider {
+    fn action(self) -> Action {
+        match self {
+            Self::Size => Action::Size,
+            Self::Opacity => Action::Opacity,
+            Self::Hardness => Action::Hardness,
+            Self::Flow => Action::Flow,
+            Self::Spacing => Action::Spacing,
+            Self::Angle => Action::Angle,
+            Self::Roundness => Action::Roundness,
+            Self::Grain => Action::Grain,
+            Self::Scatter => Action::Scatter,
+            Self::FontSize => Action::FontSize,
+            Self::TextSize => Action::TextSize,
+            Self::LayerOpacity => Action::LayerOpacity,
+            Self::Hue => Action::Hue,
+        }
+    }
+    fn for_action(action: Action) -> Option<Self> {
+        [
+            Self::Size,
+            Self::Opacity,
+            Self::Hardness,
+            Self::Flow,
+            Self::Spacing,
+            Self::Angle,
+            Self::Roundness,
+            Self::Grain,
+            Self::Scatter,
+            Self::FontSize,
+            Self::TextSize,
+            Self::LayerOpacity,
+            Self::Hue,
+        ]
+        .into_iter()
+        .find(|s| s.action() == action)
+    }
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ControlKind {
@@ -1951,6 +2026,10 @@ pub struct PortfolioApp {
     pub tool: Tool,
     brush: Brush,
     text_style: TextLayer,
+    draft: Option<TextDraft>,
+    text_session: u64,
+    place_new_text: bool,
+    text_renderer: fn(&TextLayer, u32, u32, Language) -> Result<Vec<Color>, String>,
     tool_popup: Option<ToolPanel>,
     tool_panel_pinned: bool,
     toolbar_position: Option<(f32, f32)>,
@@ -2022,6 +2101,38 @@ pub struct PortfolioApp {
 
 impl PortfolioApp {
     fn activate(&mut self, a: Action, out: &mut Vec<Effect>) {
+        if self.draft.is_some()
+            && (matches!(a, Action::Tool(tool) if tool != Tool::Text)
+                || matches!(
+                    a,
+                    Action::ToolPanel(_)
+                        | Action::Shape(_)
+                        | Action::Brush(_)
+                        | Action::Save
+                        | Action::SaveAs
+                        | Action::Export
+                        | Action::New
+                        | Action::Demo
+                        | Action::Open
+                        | Action::Import
+                        | Action::Settings
+                        | Action::Help
+                        | Action::Undo
+                        | Action::Redo
+                        | Action::Layer(_)
+                        | Action::AddLayer
+                        | Action::DeleteLayer
+                        | Action::Lock(_)
+                        | Action::Visible(_)
+                        | Action::Duplicate
+                        | Action::Raise
+                        | Action::Lower
+                        | Action::Rename
+                ))
+            && !self.finish_canvas_text(true, out)
+        {
+            return;
+        }
         let keyboard = self.focus.is_some() || self.pending_focus.is_some();
         let properties_keyboard = keyboard && self.tool_properties_has_focus();
         self.pending_properties_focus = properties_keyboard;
@@ -2057,6 +2168,7 @@ impl PortfolioApp {
                     | Action::SetLanguage(_)
                     | Action::SetAnimations(_)
                     | Action::FontSize
+                    | Action::ResetSlider(Slider::FontSize)
                     | Action::Inspector(_)
                     | Action::ResetAppearance
                     | Action::Help
@@ -2080,7 +2192,7 @@ impl PortfolioApp {
             self.overlay = Overlay::None;
             self.hover = None;
         }
-        if properties_keyboard && a.is_brush_parameter() {
+        if properties_keyboard && a.is_parameter() {
             self.pending_focus = Some(a);
         }
         let keeps_chooser = self.tool_settings_visible()
@@ -2282,11 +2394,18 @@ impl PortfolioApp {
                 }
             }
             Action::AddBrush | Action::RenameBrush => self.edit_preset_name(a == Action::AddBrush),
+            Action::ResetSlider(slider) => {
+                self.reset_slider(slider);
+                if keyboard {
+                    self.pending_focus = Some(a);
+                }
+            }
             Action::ResetBrush => {
                 ToolSettings::preset(self.brush.kind, self.tool == Tool::Eraser)
                     .apply(&mut self.brush);
             }
             Action::FontSize
+            | Action::TextSize
             | Action::Hardness
             | Action::Flow
             | Action::Spacing
@@ -2365,24 +2484,13 @@ impl PortfolioApp {
             Action::Tool(tool) => {
                 self.switch_tool(tool);
                 if tool == Tool::Text {
+                    self.show_text_properties();
                     self.feedback("Щёлкните по холсту для надписи или по буквам для правки.");
                 } else {
                     self.feedback(format!("{} · {}", tool.info().1, tool.info().2));
                 }
             }
             Action::ToolProperties => {
-                if self.tool == Tool::Text {
-                    if !self.busy {
-                        let target = self
-                            .doc
-                            .active_layer()
-                            .text
-                            .as_ref()
-                            .map(|_| self.doc.active_layer().id);
-                        self.open_canvas_text(target, self.doc.width / 2, self.doc.height / 2, out);
-                    }
-                    return;
-                }
                 if self.tool_has_properties() {
                     if self.tool_settings_visible() {
                         self.close_tool_settings();
@@ -2393,7 +2501,9 @@ impl PortfolioApp {
                         self.hover = None;
                         self.pending_focus = if keyboard {
                             self.pending_properties_focus = true;
-                            Some(if self.tool == Tool::Fill {
+                            Some(if self.tool == Tool::Text {
+                                Action::TextSize
+                            } else if self.tool == Tool::Fill {
                                 Action::Opacity
                             } else {
                                 Action::Size
@@ -2537,6 +2647,16 @@ impl PortfolioApp {
                 }
                 Err(e) => self.error(e, out),
             },
+            Action::NewText
+            | Action::ApplyText
+            | Action::CancelText
+            | Action::TextFont(_)
+            | Action::TextBold
+            | Action::TextItalic
+            | Action::TextAlign(_)
+            | Action::TextColor
+            | Action::TextX
+            | Action::TextY => self.text_action(a, out),
             Action::EditTextLayer(id) => self.open_canvas_text(Some(id), 0, 0, out),
             Action::Layer(i) => {
                 if i < self.doc.layers.len() {
@@ -2627,37 +2747,6 @@ impl PortfolioApp {
             }
         }
     }
-    fn open_canvas_text(&mut self, target: Option<u64>, x: u32, y: u32, out: &mut Vec<Effect>) {
-        let text = if let Some(id) = target {
-            let Some(layer) = self.doc.layers.iter().find(|l| l.id == id) else {
-                return;
-            };
-            if !layer.visible || layer.locked {
-                self.feedback("Слой скрыт или заблокирован. Выберите доступный слой.");
-                return;
-            }
-            let Some(text) = layer.text.clone() else {
-                return;
-            };
-            text
-        } else {
-            TextLayer {
-                body: String::new(),
-                x,
-                y,
-                color: self.brush.color,
-                ..self.text_style.clone()
-            }
-        };
-        out.push(Effect::EditTextLayer {
-            document: self.document_id,
-            target,
-            width: self.doc.width,
-            height: self.doc.height,
-            text,
-        });
-    }
-
     fn accept_prompt(&mut self, id: u32, value: Option<String>, out: &mut Vec<Effect>) {
         let Some(value) = value else {
             return;
@@ -2691,7 +2780,7 @@ impl PortfolioApp {
                     _ => self.error(format!("Введите число от {min:.0} до {max:.0}."), out),
                 }
             }
-            17..=24 => {
+            17..=25 => {
                 let action = match id {
                     17 => Action::Hardness,
                     18 => Action::Flow,
@@ -2700,12 +2789,37 @@ impl PortfolioApp {
                     21 => Action::Scatter,
                     23 => Action::Roundness,
                     24 => Action::Grain,
+                    25 => Action::TextSize,
                     _ => Action::FontSize,
                 };
                 let (min, max, _, _, _) = self.parameter_info(action);
                 match value.trim().replace(',', ".").parse::<f32>() {
                     Ok(v) if v.is_finite() && v >= min && v <= max => self.set_parameter(action, v),
                     _ => self.error(format!("Введите число от {min:.0} до {max:.0}."), out),
+                }
+            }
+            26 => match parse_hex(&value) {
+                Some(color) => self.current_text_mut().color = color,
+                None => self.error("Шесть символов HEX, например #365AD7", out),
+            },
+            27 | 28 => {
+                if self.draft.is_none() {
+                    return;
+                }
+                let limit = if id == 27 {
+                    self.doc.width
+                } else {
+                    self.doc.height
+                };
+                match value.trim().parse::<u32>() {
+                    Ok(n) if n < limit => {
+                        if id == 27 {
+                            self.current_text_mut().x = n;
+                        } else {
+                            self.current_text_mut().y = n;
+                        }
+                    }
+                    _ => self.error("Координата должна находиться внутри холста.", out),
                 }
             }
             14 => match self.doc.rename_layer(self.doc.active, value.trim()) {
@@ -2939,7 +3053,7 @@ impl PortfolioApp {
                 } else {
                     self.color_h = (((x - rect.x) / rect.w).clamp(0., 1.) * 360.).rem_euclid(360.);
                 }
-                self.brush.color = hsv(self.color_h, self.color_s, self.color_v);
+                self.set_ink(hsv(self.color_h, self.color_s, self.color_v));
             }
             Drag::None => {}
         }
@@ -3251,7 +3365,7 @@ impl PortfolioApp {
         }
         if self.tool == Tool::Text {
             let (x, y) = (dx as u32, dy as u32);
-            let target = if modifiers.shift {
+            let target = if modifiers.shift || self.place_new_text {
                 None
             } else {
                 self.doc.text_layer_at(x, y).map(|l| l.id)
@@ -3300,6 +3414,27 @@ impl PortfolioApp {
         }
     }
     fn key(&mut self, code: u32, pressed: bool, repeat: bool, m: Modifiers, out: &mut Vec<Effect>) {
+        if pressed && self.draft.is_some() && (code == 27 || (code == 13 && m.ctrl)) {
+            self.finish_canvas_text(code == 13, out);
+            return;
+        }
+        if pressed && code == 117 && self.draft.is_some() && self.tool_properties_has_focus() {
+            self.focus = None;
+            self.pending_focus = None;
+            out.push(Effect::FocusCanvasText);
+            return;
+        }
+        if pressed && self.draft.is_some() && m.ctrl && code == 83 {
+            self.activate(
+                if m.shift {
+                    Action::SaveAs
+                } else {
+                    Action::Save
+                },
+                out,
+            );
+            return;
+        }
         if self.preset_name_key(code, pressed, m, out) {
             return;
         }
@@ -3412,7 +3547,9 @@ impl PortfolioApp {
             self.activate(Action::ToolProperties, out);
             if self.tool_settings_visible() {
                 self.pending_properties_focus = true;
-                self.pending_focus = Some(if self.tool == Tool::Fill {
+                self.pending_focus = Some(if self.tool == Tool::Text {
+                    Action::TextSize
+                } else if self.tool == Tool::Fill {
                     Action::Opacity
                 } else {
                     Action::Size
@@ -3503,7 +3640,7 @@ impl PortfolioApp {
                         let step = step * if m.shift { 10. } else { 1. };
                         if !self.busy {
                             let action = c.action;
-                            if action.is_brush_parameter() {
+                            if action.is_parameter() {
                                 self.set_parameter(action, self.parameter_value(action) + step);
                             }
                         }
@@ -3599,7 +3736,7 @@ impl PortfolioApp {
                         }
                         Action::Hue => {
                             self.color_h = (self.color_h + d * k).rem_euclid(360.);
-                            self.brush.color = hsv(self.color_h, self.color_s, self.color_v);
+                            self.set_ink(hsv(self.color_h, self.color_s, self.color_v));
                         }
                         Action::SV => {
                             if code == 37 || code == 39 {
@@ -3607,7 +3744,7 @@ impl PortfolioApp {
                             } else {
                                 self.color_v = (self.color_v + d * k / 100.).clamp(0., 1.);
                             }
-                            self.brush.color = hsv(self.color_h, self.color_s, self.color_v);
+                            self.set_ink(hsv(self.color_h, self.color_s, self.color_v));
                         }
                         _ => {}
                     }
@@ -3719,6 +3856,9 @@ impl PortfolioApp {
 }
 
 impl NativeApp for PortfolioApp {
+    fn canvas_editor(&self) -> Option<platform::CanvasEditView> {
+        self.canvas_edit_view()
+    }
     fn preferred_language(&self) -> &'static str {
         self.language.key()
     }
@@ -3809,7 +3949,11 @@ impl NativeApp for PortfolioApp {
             Event::ReducedMotion(value) => {
                 self.system_reduced_motion = value;
             }
-            Event::FilesDropped { paths } => self.queue_imports(paths, &mut out),
+            Event::FilesDropped { paths } => {
+                if self.finish_canvas_text(true, &mut out) {
+                    self.queue_imports(paths, &mut out);
+                }
+            }
             Event::MouseMove { x, y, modifiers } => {
                 self.pointer = (x, y);
                 self.alt = modifiers.alt;
@@ -3846,6 +3990,20 @@ impl NativeApp for PortfolioApp {
                 button,
                 modifiers,
             } => {
+                if self.draft.is_some()
+                    && button == MouseButton::Left
+                    && (matches!(
+                        self.drag,
+                        Drag::Slider {
+                            action: Action::TextSize,
+                            ..
+                        }
+                    ) || self.controls.iter().any(|c| {
+                        c.enabled && Self::text_row(c.action).is_some() && c.hit.contains(x, y)
+                    }))
+                {
+                    out.push(Effect::FocusCanvasText);
+                }
                 if !matches!(
                     self.drag,
                     Drag::Slider { .. }
@@ -4009,7 +4167,11 @@ impl NativeApp for PortfolioApp {
             }
             Event::CaptureLost => self.cancel_drag(),
             Event::Tick => self.tick(&mut out),
-            Event::CloseRequested => self.request_replace(Pending::Quit, &mut out),
+            Event::CloseRequested => {
+                if self.finish_canvas_text(true, &mut out) {
+                    self.request_replace(Pending::Quit, &mut out);
+                }
+            }
             Event::Confirmed { id, answer } => {
                 if id == 1 {
                     match answer {
@@ -4038,26 +4200,28 @@ impl NativeApp for PortfolioApp {
                     }
                 }
             }
-            Event::TextLayerEdited {
-                document,
-                target,
-                text,
-                pixels,
-            } => {
-                if document == self.document_id && !self.busy {
-                    match self.doc.set_text_layer(target, text.clone(), pixels) {
-                        Ok(true) => {
-                            self.text_style = text;
-                            self.inspector_layers = true;
-                            self.layer_scroll = 0;
-                            self.changed();
-                        }
-                        Ok(false) => {}
-                        Err(error) => self.error(error, &mut out),
-                    }
+            Event::CanvasTextChanged { session, body } => {
+                if let Some(draft) = self.draft.as_mut().filter(|d| d.session == session) {
+                    draft.text.body = body;
                 }
             }
-            Event::Prompted { id, value } => self.accept_prompt(id, value, &mut out),
+            Event::FocusTextSettings => {
+                if self.draft.is_some() {
+                    self.show_text_properties();
+                    self.pending_properties_focus = true;
+                    self.tool_settings_reveal_action(Action::TextSize);
+                    self.pending_focus = Some(Action::TextSize);
+                }
+            }
+            Event::FinishCanvasText(apply) => {
+                self.finish_canvas_text(apply, &mut out);
+            }
+            Event::Prompted { id, value } => {
+                self.accept_prompt(id, value, &mut out);
+                if (25..=28).contains(&id) && self.draft.is_some() {
+                    out.push(Effect::FocusCanvasText);
+                }
+            }
             Event::FileSelected { kind, path } => self.selected_file(kind, path, &mut out),
             Event::Text(value) | Event::Paste(value) => {
                 if let Some(edit) = self.tool_properties_ui.name_edit.as_mut() {
@@ -4150,7 +4314,7 @@ impl PortfolioApp {
             .and_then(|s| Presets::decode(&s))
             .unwrap_or_default();
         let mut brush = Brush {
-            color: Color::from_hex(0x365ad7),
+            color: Color::from_hex(DEFAULT_INK),
             size: 24.,
             opacity: 1.,
             kind: BrushKind::Ink,
@@ -4195,6 +4359,10 @@ impl PortfolioApp {
             quick_preview_painted: None,
             quick_disc: None,
             tool: Tool::Brush,
+            draft: None,
+            text_session: 0,
+            place_new_text: false,
+            text_renderer: platform::rasterize_text,
             text_style: TextLayer {
                 body: String::new(),
                 font: UiFont::SegoeUi.key().into(),
@@ -4303,7 +4471,7 @@ impl PortfolioApp {
     }
     fn toolbar_grip_rect(&self) -> Rect {
         let bar = self.top_tools_rect();
-        Rect::new(bar.x + TOOLBAR_GRIP_OFFSET, bar.y + 8., 20., 32.)
+        Rect::new(bar.x + bar.w - TOOLBAR_GRIP_END, bar.y + 8., 20., 32.)
     }
     fn tool_family_rect(&self, family: ToolPanel) -> Rect {
         let index = match family {
@@ -4320,6 +4488,7 @@ impl PortfolioApp {
     }
     fn quick_controls_visible(&self) -> bool {
         !self.focused_mode
+            && self.tool != Tool::Text
             && self.tool_has_properties()
             && (self.tool_popup.is_none() || self.tool_panel_pinned || self.tool_settings_visible())
             && self.closing_popup.is_none()
@@ -4418,7 +4587,12 @@ impl PortfolioApp {
             .or_else(|| ToolPanel::for_tool(self.tool))
             .unwrap_or(ToolPanel::Brush);
         let popup = self.tool_popup_bounds(family);
-        Rect::new(popup.x + popup.w - 36., popup.y + 48., 28., 28.)
+        Rect::new(
+            popup.x + popup.w - 36.,
+            self.browser_search_button_rect(family).y - 2.,
+            28.,
+            28.,
+        )
     }
     fn tool_settings_visible(&self) -> bool {
         self.overlay == Overlay::ToolProperties && self.tool_has_properties()
@@ -4440,7 +4614,7 @@ impl PortfolioApp {
                 || (self.pending_properties_focus && self.pending_focus.is_some()))
     }
     fn tool_has_properties(&self) -> bool {
-        ToolPanel::for_tool(self.tool).is_some() || self.tool == Tool::Fill
+        ToolPanel::for_tool(self.tool).is_some() || matches!(self.tool, Tool::Fill | Tool::Text)
     }
     fn tool_properties_title(&self) -> &'static str {
         self.tool.info().1
@@ -5317,8 +5491,12 @@ impl PortfolioApp {
         self.composite_dirty = true;
         self.title_dirty = true;
     }
-    fn update_color(&mut self, c: Color) {
+    fn set_ink(&mut self, c: Color) {
         self.brush.color = c;
+        self.current_text_mut().color = c;
+    }
+    fn update_color(&mut self, c: Color) {
+        self.set_ink(c);
         let (h, s, v) = to_hsv(c, self.color_h);
         self.color_h = h;
         self.color_s = s;
@@ -5337,6 +5515,8 @@ impl PortfolioApp {
         }
     }
     fn reset_document(&mut self, doc: Document, path: Option<PathBuf>, unsaved: bool) {
+        self.draft = None;
+        self.place_new_text = false;
         self.document_id = self.document_id.wrapping_add(1);
         if !unsaved {
             self.clear_recovery();
@@ -5831,6 +6011,8 @@ impl PortfolioApp {
         enabled: bool,
     ) {
         let t = Theme::with_accent(self.dark, self.accent);
+        let reset = Rect::new(r.x + r.w - 24., r.y + 1., 24., 24.);
+        let r = Rect::new(r.x, r.y, (r.w - 33.).max(1.), r.h);
         p.label(r.x, r.y, r.w - 60., label, 12., t.muted);
         p.text(
             Rect::new(r.x + r.w - 64., r.y - 1., 64., 22.),
@@ -5868,6 +6050,9 @@ impl PortfolioApp {
             enabled,
             ControlKind::Value,
         );
+        if let Some(slider) = Slider::for_action(action) {
+            self.slider_reset_button(p, reset, slider, label, enabled);
+        }
     }
 }
 
@@ -5887,7 +6072,7 @@ impl Action {
         )
     }
     fn is_parameter(self) -> bool {
-        self.is_brush_parameter() || self == Self::FontSize
+        self.is_brush_parameter() || matches!(self, Self::FontSize | Self::TextSize)
     }
 }
 impl PortfolioApp {
@@ -6180,6 +6365,55 @@ impl PortfolioApp {
             p.image(r, 112, 40, sample, false, 1.);
         }
     }
+    fn reset_slider(&mut self, slider: Slider) {
+        let preset = ToolSettings::preset(self.brush.kind, self.tool == Tool::Eraser);
+        let value = match slider {
+            Slider::Size if ToolPanel::for_tool(self.tool) == Some(ToolPanel::Shapes) => 4.,
+            Slider::Size => preset.size,
+            Slider::Opacity => preset.opacity * 100.,
+            Slider::Hardness => preset.hardness * 100.,
+            Slider::Flow => preset.flow * 100.,
+            Slider::Spacing => preset.spacing * 100.,
+            Slider::Angle => preset.angle,
+            Slider::Roundness => preset.roundness * 100.,
+            Slider::Grain => preset.grain * 100.,
+            Slider::Scatter => preset.scatter * 100.,
+            Slider::FontSize => Appearance::default().font_size as f32,
+            Slider::TextSize => 48.,
+            Slider::LayerOpacity => {
+                if self.doc.set_layer_opacity(self.doc.active, 255) {
+                    self.changed();
+                }
+                return;
+            }
+            Slider::Hue => {
+                self.color_h = to_hsv(Color::from_hex(DEFAULT_INK), 220.).0;
+                self.set_ink(hsv(self.color_h, self.color_s, self.color_v));
+                self.remember();
+                return;
+            }
+        };
+        self.set_parameter(slider.action(), value);
+    }
+
+    fn slider_reset_button(
+        &mut self,
+        p: &mut Painter,
+        r: Rect,
+        slider: Slider,
+        label: &str,
+        enabled: bool,
+    ) {
+        self.icon_button(
+            p,
+            r,
+            Action::ResetSlider(slider),
+            "reset",
+            &format!("Сбросить значение: {label}"),
+            false,
+            enabled,
+        );
+    }
     fn parameter_info(&self, a: Action) -> (f32, f32, &'static str, u32, &'static str) {
         match a {
             Action::Size => (1., 512., "Размер", 11, "px"),
@@ -6201,6 +6435,7 @@ impl PortfolioApp {
             Action::Roundness => (10., 100., "Округлость", 23, "%"),
             Action::Grain => (0., 100., "Зерно", 24, "%"),
             Action::Scatter => (0., 100., "Разброс", 21, "%"),
+            Action::TextSize => (4., 512., "Размер шрифта", 25, "px"),
             Action::FontSize => (11., 17., "Размер текста", 22, "px"),
             _ => (0., 1., "", 0, ""),
         }
@@ -6217,6 +6452,7 @@ impl PortfolioApp {
             Action::Grain => self.brush.grain * 100.,
             Action::Scatter => self.brush.scatter * 100.,
             Action::FontSize => self.font_size as f32,
+            Action::TextSize => self.current_text().size as f32,
             _ => 0.,
         }
     }
@@ -6236,6 +6472,7 @@ impl PortfolioApp {
             Action::Roundness => self.brush.roundness = value / 100.,
             Action::Grain => self.brush.grain = value / 100.,
             Action::Scatter => self.brush.scatter = value / 100.,
+            Action::TextSize => self.current_text_mut().size = value.round() as u32,
             Action::FontSize => {
                 self.font_size = value.round() as u16;
                 self.preferences_dirty = true;
