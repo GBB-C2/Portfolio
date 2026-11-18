@@ -1519,7 +1519,12 @@ fn tool_properties_sections_reveal_only_their_parameters_and_preserve_independen
             app.render();
             assert_eq!(app.tool_settings_section(), 0);
             assert_eq!(focused_action(&app), Some(Action::Size));
-            for action in [Action::Opacity, Action::Hardness] {
+            for action in [
+                Action::ResetSlider(Slider::Size),
+                Action::Opacity,
+                Action::ResetSlider(Slider::Opacity),
+                Action::Hardness,
+            ] {
                 press_key(&mut app, 9, false);
                 app.render();
                 assert_eq!(focused_action(&app), Some(action));
@@ -1527,7 +1532,7 @@ fn tool_properties_sections_reveal_only_their_parameters_and_preserve_independen
                 assert!(panel.contains(hit.x + hit.w * 0.5, hit.y + hit.h * 0.5));
                 assert_eq!(app.tool_settings_section(), 0);
             }
-            for _ in 0..3 {
+            for _ in 0..5 {
                 app.event(Event::Key {
                     code: 9,
                     pressed: true,
@@ -3874,6 +3879,9 @@ fn contextual_gears_live_below_chooser_pin_and_keep_the_active_family() {
             .hit;
         assert!(gear.y >= close.y + close.h);
         assert_eq!(gear.x, close.x);
+        let search = app.browser_search_button_rect(family);
+        assert_eq!(gear.y + gear.h / 2., search.y + search.h / 2.);
+        assert!(search.x + search.w <= gear.x);
         assert!(popup.contains(gear.x + gear.w * 0.5, gear.y + gear.h * 0.5));
         assert!(!app.top_tools_rect().contains(gear.x, gear.y));
         click_action(&mut app, Action::ToolProperties);
@@ -5293,87 +5301,213 @@ fn preset_header_renames_copies_and_restores_independent_brushes() {
     assert_eq!(app.doc.to_bytes().unwrap(), doc);
 }
 
+fn anchor_raster(text: &TextLayer, w: u32, h: u32, _: Language) -> Result<Vec<Color>, String> {
+    let mut pixels = vec![Color::TRANSPARENT; (w * h) as usize];
+    pixels[(text.y * w + text.x) as usize] = text.color;
+    Ok(pixels)
+}
+
 #[test]
 fn canvas_text_creation_and_reediting_use_document_coordinates_and_one_undo_step() {
-    fn request(effects: Vec<Effect>) -> (u64, Option<u64>, TextLayer) {
-        effects
-            .into_iter()
-            .find_map(|e| match e {
-                Effect::EditTextLayer {
-                    document,
-                    target,
-                    text,
-                    ..
-                } => Some((document, target, text)),
-                _ => None,
-            })
-            .expect("editable text dialog")
-    }
     let mut app = floating_panel_fixture();
+    app.text_renderer = anchor_raster;
     click_action(&mut app, Action::Tool(Tool::Text));
+    assert!(app.tool_settings_visible());
+    assert!(!app.quick_controls_visible());
     let (x, y) = (810., 650.);
     let (dx, dy) = app.doc_point(x, y);
-    let click = |app: &mut PortfolioApp| {
+    let place = |app: &mut PortfolioApp| {
         app.event(Event::MouseDown {
             x,
             y,
             button: MouseButton::Left,
             modifiers: Modifiers::default(),
-        })
+        });
     };
-    let (document, target, mut text) = request(click(&mut app));
-    assert_eq!(target, None);
-    assert_eq!((text.x, text.y), (dx as u32, dy as u32));
-    assert_eq!(app.doc.undo_count(), 0); // Dismissing the dialog produces no edit.
-    text.body = "Абзац & 字\nСтрока 2".into();
-    text.bold = true;
-    text.align = ParagraphAlign::Center;
-    let mut pixels = vec![Color::TRANSPARENT; (app.doc.width * app.doc.height) as usize];
-    let index = (text.y * app.doc.width + text.x) as usize;
-    pixels[index] = text.color;
-    app.event(Event::TextLayerEdited {
-        document,
-        target,
-        text: text.clone(),
-        pixels: pixels.clone(),
+    place(&mut app);
+    let view = app.canvas_editor().unwrap();
+    assert_eq!((view.text.x, view.text.y), (dx as u32, dy as u32));
+    assert!((view.anchor.0 as f32 - x * app.scale).abs() < 2.);
+    assert_eq!(app.doc.undo_count(), 0);
+    app.event(Event::CanvasTextChanged {
+        session: view.session,
+        body: "Абзац & 字🌿\nСтрока 2".into(),
     });
+    click_action(&mut app, Action::TextBold);
+    click_action(&mut app, Action::TextAlign(ParagraphAlign::Center));
+    click_action(&mut app, Action::TextFont(true));
+    app.event(Event::Prompted {
+        id: 25,
+        value: Some("65".into()),
+    });
+    app.event(Event::Prompted {
+        id: 26,
+        value: Some("#6A3281".into()),
+    });
+    let text = app.canvas_editor().unwrap().text;
+    assert_eq!(text.size, 65);
+    assert_eq!(text.color.to_hex(), "#6A3281");
+    assert!(text.bold && text.body.contains('🌿'));
+    assert_eq!(text.align, ParagraphAlign::Center);
+    click_action(&mut app, Action::ApplyText);
+    assert!(app.canvas_editor().is_none());
     let id = app.doc.active_layer().id;
     assert_eq!(app.doc.undo_count(), 1);
     assert_eq!(app.doc.active_layer().text.as_ref(), Some(&text));
-    assert!(!app.doc.can_paint());
-    let (_, target_from_layers, _) = request(click_action(&mut app, Action::EditTextLayer(id)));
-    assert_eq!(target_from_layers, Some(id));
     let saved = app.doc.snapshot_for_io().unwrap().to_bytes().unwrap();
-    assert_eq!(&saved[..8], b"PRTFOL02");
     app.doc = Document::from_bytes(&saved).unwrap();
-    assert_eq!(app.doc.active_layer().text.as_ref(), Some(&text));
-    let (_, target, mut edited) = request(click(&mut app));
-    assert_eq!(target, Some(id));
-    assert_eq!(edited, text);
-    edited.body = "Изменено".into();
-    edited.italic = true;
-    pixels[index] = Color::BLACK;
-    app.event(Event::TextLayerEdited {
-        document,
-        target,
-        text: edited.clone(),
-        pixels: pixels.clone(),
+    click_action(&mut app, Action::EditTextLayer(id));
+    let edit = app.canvas_editor().unwrap();
+    assert_eq!(edit.text, text);
+    app.event(Event::CanvasTextChanged {
+        session: view.session,
+        body: "stale".into(),
     });
+    assert_eq!(app.current_text(), &text);
+    app.event(Event::CanvasTextChanged {
+        session: edit.session,
+        body: "отменить".into(),
+    });
+    app.render();
+    let at = (text.y * app.doc.width + text.x) as usize;
+    assert_ne!(app.composite[at], app.doc.composite()[at]);
+    press_key(&mut app, 27, false);
+    assert!(app.canvas_editor().is_none());
+    assert_eq!(app.doc.to_bytes().unwrap(), saved);
+    place(&mut app);
+    assert_eq!(app.draft.as_ref().unwrap().target, Some(id));
+    let session = app.canvas_editor().unwrap().session;
+    app.event(Event::CanvasTextChanged {
+        session,
+        body: "Изменено".into(),
+    });
+    click_action(&mut app, Action::TextItalic);
+    let edited = app.canvas_editor().unwrap().text;
+    press_key(&mut app, 13, true);
     assert_eq!(app.doc.undo_count(), 1);
     assert!(app.doc.undo());
     assert_eq!(app.doc.to_bytes().unwrap(), saved);
     assert!(app.doc.redo());
     assert_eq!(app.doc.active_layer().text.as_ref(), Some(&edited));
     app.doc.layers[app.doc.active].locked = true;
-    let before = app.doc.to_bytes().unwrap();
-    assert!(!click(&mut app)
-        .iter()
-        .any(|e| matches!(e, Effect::EditTextLayer { .. })));
-    app.event(Event::TextLayerEdited {
-        document: document + 1,
-        target: None,
-        text: edited,
-        pixels,
+    place(&mut app);
+    assert!(app.canvas_editor().is_none());
+    click_action(&mut app, Action::NewText);
+    place(&mut app);
+    assert_eq!(app.draft.as_ref().unwrap().target, None);
+    click_action(&mut app, Action::CancelText);
+    assert_eq!(app.doc.undo_count(), 1);
+}
+
+#[test]
+fn canvas_text_survives_failed_apply_and_follows_zoom_and_panel_focus() {
+    let mut app = floating_panel_fixture();
+    let mut out = Vec::new();
+    app.open_canvas_text(None, app.doc.width / 2, app.doc.height / 2, &mut out);
+    let first = app.canvas_editor().unwrap();
+    app.event(Event::CanvasTextChanged {
+        session: first.session,
+        body: "текст".into(),
     });
-    assert_eq!(app.doc.to_bytes().unwrap(), before);
+    app.text_renderer = |_, _, _, _| Err("render error".into());
+    app.activate(Action::Save, &mut out);
+    assert!(out
+        .iter()
+        .any(|e| matches!(e, Effect::Message { error: true, .. })));
+    assert_eq!(app.current_text().body, "текст");
+    assert!(!app.doc.can_undo());
+    app.event(Event::FocusTextSettings);
+    app.render();
+    assert_eq!(focused_action(&app), Some(Action::TextSize));
+    press_key(&mut app, 39, false);
+    assert_eq!(app.current_text().size, 49);
+    let before = app.canvas_editor().unwrap();
+    app.zoom_at(2., 420., 330.);
+    let after = app.canvas_editor().unwrap();
+    assert!(after.font_px > before.font_px && after.anchor != before.anchor);
+    app.text_renderer = anchor_raster;
+    app.activate(Action::Tool(Tool::Brush), &mut out);
+    assert!(app.canvas_editor().is_none());
+    assert_eq!(app.doc.active_layer().text.as_ref().unwrap().body, "текст");
+}
+
+#[test]
+fn each_full_size_slider_resets_only_its_parameter() {
+    let mut app = floating_panel_fixture();
+    click_action(&mut app, Action::ToolPanel(ToolPanel::Eraser));
+    click_action(&mut app, Action::PinToolPanel);
+    click_action(&mut app, Action::ToolProperties);
+    let defaults = ToolSettings::from_brush(app.brush);
+    for slider in [
+        Slider::Size,
+        Slider::Opacity,
+        Slider::Hardness,
+        Slider::Flow,
+        Slider::Spacing,
+        Slider::Angle,
+        Slider::Roundness,
+        Slider::Grain,
+        Slider::Scatter,
+    ] {
+        let action = slider.action();
+        let default = app.parameter_value(action);
+        let (min, max, _, _, _) = app.parameter_info(action);
+        app.set_parameter(action, if default == min { max } else { min });
+        let reset = Action::ResetSlider(slider);
+        assert!(app.tool_settings_reveal_action(reset));
+        app.render();
+        let button = app
+            .controls
+            .iter()
+            .find(|c| c.enabled && c.action == reset)
+            .unwrap();
+        assert!(app
+            .tool_settings_rect()
+            .contains(button.hit.x + 1., button.hit.y + 1.));
+        assert!(!app.quick_controls_rect().intersects(button.hit));
+        click_action(&mut app, reset);
+        assert!((app.parameter_value(action) - default).abs() < 0.001);
+    }
+    assert_eq!(ToolSettings::from_brush(app.brush), defaults);
+    press_key(&mut app, 115, false);
+    app.render();
+    assert!(app.quick_controls_visible());
+    assert!(!app.controls.iter().any(|c| c.enabled
+        && matches!(c.action, Action::ResetSlider(_))
+        && c.hit.intersects(app.quick_controls_rect())));
+    app.activate(Action::Tool(Tool::Rectangle), &mut Vec::new());
+    app.set_parameter(Action::Size, 70.);
+    app.set_parameter(Action::Opacity, 42.);
+    app.activate(Action::ResetSlider(Slider::Size), &mut Vec::new());
+    assert_eq!(app.brush.size, 4.);
+    assert!((app.brush.opacity - 0.42).abs() < 0.001);
+    app.doc.set_layer_opacity(app.doc.active, 80);
+    app.activate(Action::ResetSlider(Slider::LayerOpacity), &mut Vec::new());
+    assert_eq!(app.doc.active_layer().opacity, 255);
+    assert!(app.doc.undo());
+    assert_eq!(app.doc.active_layer().opacity, 80);
+    app.color_s = 0.4;
+    app.color_v = 0.67;
+    app.color_h = 12.;
+    app.activate(Action::ResetSlider(Slider::Hue), &mut Vec::new());
+    assert_eq!((app.color_s, app.color_v), (0.4, 0.67));
+    assert_eq!(app.color_h, to_hsv(Color::from_hex(DEFAULT_INK), 220.).0);
+    app.set_parameter(Action::FontSize, 17.);
+    app.activate(Action::ResetSlider(Slider::FontSize), &mut Vec::new());
+    assert_eq!(app.font_size, Appearance::default().font_size);
+    press_key(&mut app, 84, false);
+    app.set_parameter(Action::TextSize, 400.);
+    click_action(&mut app, Action::ResetSlider(Slider::TextSize));
+    assert_eq!(app.current_text().size, 48);
+    app.render();
+    let bar = app.top_tools_rect();
+    let grip = app.toolbar_grip_rect();
+    assert!(app
+        .controls
+        .iter()
+        .filter(|c| c.enabled
+            && c.action != Action::MoveToolbar
+            && c.action != Action::NoOp
+            && bar.contains(c.hit.x + c.hit.w / 2., c.hit.y + c.hit.h / 2.))
+        .all(|c| c.hit.x + c.hit.w <= grip.x));
 }

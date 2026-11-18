@@ -346,7 +346,9 @@ impl PortfolioApp {
                     actions.extend([Action::SetAnimations(true), Action::SetAnimations(false)])
                 }
                 Field::Font => actions.push(Action::FontMenu),
-                Field::FontSize => actions.push(Action::FontSize),
+                Field::FontSize => {
+                    actions.extend([Action::FontSize, Action::ResetSlider(Slider::FontSize)])
+                }
                 Field::Language => actions.push(Action::LanguageMenu),
                 Field::Sample => {}
             }
@@ -364,7 +366,7 @@ impl PortfolioApp {
             Action::SetAccent(_) => Field::Accent,
             Action::SetAnimations(_) => Field::Animations,
             Action::FontMenu => Field::Font,
-            Action::FontSize => Field::FontSize,
+            Action::FontSize | Action::ResetSlider(Slider::FontSize) => Field::FontSize,
             Action::LanguageMenu => Field::Language,
             Action::ClearSettingsSearch => return !self.settings_ui.query.text().is_empty(),
             Action::SettingsSearch | Action::CloseSettings | Action::ResetAppearance => {
@@ -1041,6 +1043,7 @@ mod tests {
                 Action::ClearSettingsSearch,
                 Action::CloseSettings,
                 Action::FontSize,
+                Action::ResetSlider(Slider::FontSize),
                 Action::ResetAppearance,
             ]
         );

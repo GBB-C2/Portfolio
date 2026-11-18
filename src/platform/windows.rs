@@ -199,6 +199,10 @@ extern "system" {
     fn GetCapture() -> Hwnd;
     fn ReleaseCapture() -> i32;
     fn SetFocus(hwnd: Hwnd) -> Hwnd;
+    fn GetFocus() -> Hwnd;
+    fn GetDC(hwnd: Hwnd) -> Hdc;
+    fn ReleaseDC(hwnd: Hwnd, dc: Hdc) -> i32;
+    fn SetWindowRgn(hwnd: Hwnd, region: Handle, redraw: i32) -> i32;
     fn ScreenToClient(hwnd: Hwnd, point: *mut Point) -> i32;
     fn SetTimer(hwnd: Hwnd, id: usize, elapsed: u32, callback: *const c_void) -> usize;
     fn KillTimer(hwnd: Hwnd, id: usize) -> i32;
@@ -232,6 +236,8 @@ extern "system" {
 }
 #[link(name = "kernel32")]
 extern "system" {
+    fn LoadLibraryExW(name: *const u16, file: Handle, flags: u32) -> Handle;
+    fn FreeLibrary(module: Handle) -> i32;
     fn GetModuleHandleW(name: *const u16) -> Handle;
     fn GetLastError() -> u32;
     fn GlobalAlloc(flags: u32, bytes: usize) -> Handle;
@@ -242,6 +248,8 @@ extern "system" {
 }
 #[link(name = "gdi32")]
 extern "system" {
+    fn CreateRectRgn(left: i32, top: i32, right: i32, bottom: i32) -> Handle;
+    fn CombineRgn(dest: Handle, left: Handle, right: Handle, mode: i32) -> i32;
     fn CreateCompatibleDC(dc: Hdc) -> Hdc;
     fn DeleteDC(dc: Hdc) -> i32;
     fn DeleteObject(object: Handle) -> i32;
@@ -675,7 +683,17 @@ impl Drop for Fonts {
     }
 }
 
+pub fn rasterize_text(
+    text: &TextLayer,
+    width: u32,
+    height: u32,
+    language: Language,
+) -> Result<Vec<Color>, String> {
+    unsafe { text_editor::rasterize(text, width, height, language) }
+}
+
 struct WindowState {
+    canvas_input: text_editor::CanvasInput,
     app: Option<Box<dyn NativeApp>>,
     hwnd: Hwnd,
     scale: f32,
@@ -691,6 +709,30 @@ struct WindowState {
     captured_buttons: u8,
     high_surrogate: Option<u16>,
     fatal_error: Option<String>,
+}
+
+impl WindowState {
+    unsafe fn new(app: Box<dyn NativeApp>, scale: f32) -> Self {
+        let mut fonts = Fonts::default();
+        let font_resources = register_bundled_fonts(&mut fonts);
+        Self {
+            canvas_input: text_editor::CanvasInput::default(),
+            app: Some(app),
+            hwnd: null_mut(),
+            scale,
+            surface: None,
+            fonts,
+            text_scratch: Vec::with_capacity(256),
+            _font_resources: font_resources,
+            pacer: FramePacer::new(Instant::now()),
+            last_size: (0, 0, 0),
+            timer_ms: 0,
+            surface_failure: None,
+            captured_buttons: 0,
+            high_surrogate: None,
+            fatal_error: None,
+        }
+    }
 }
 
 unsafe fn register_bundled_fonts(fonts: &mut Fonts) -> Vec<FontResource> {
@@ -800,24 +842,7 @@ pub fn run(app: Box<dyn NativeApp>) -> Result<(), String> {
         let screen_h = GetSystemMetrics(1).max(600);
         let width = (rect.right - rect.left).min(screen_w - 64);
         let height = (rect.bottom - rect.top).min(screen_h - 80);
-        let mut fonts = Fonts::default();
-        let font_resources = register_bundled_fonts(&mut fonts);
-        let state = Box::new(WindowState {
-            app: Some(app),
-            hwnd: null_mut(),
-            scale,
-            surface: None,
-            fonts,
-            text_scratch: Vec::with_capacity(256),
-            _font_resources: font_resources,
-            pacer: FramePacer::new(Instant::now()),
-            last_size: (0, 0, 0),
-            timer_ms: 0,
-            surface_failure: None,
-            captured_buttons: 0,
-            high_surrogate: None,
-            fatal_error: None,
-        });
+        let state = Box::new(WindowState::new(app, scale));
         let ptr = Box::into_raw(state);
         let title = wide("Portfolio — студия рисования");
         let hwnd = CreateWindowExW(
@@ -863,8 +888,10 @@ pub fn run(app: Box<dyn NativeApp>) -> Result<(), String> {
                     GetLastError()
                 ));
             }
-            TranslateMessage(&message);
-            DispatchMessageW(&message);
+            if !text_editor::shortcut(ptr, &message) {
+                TranslateMessage(&message);
+                DispatchMessageW(&message);
+            }
             // Continuous mouse input must not starve an already-due frame.
             if !(*ptr).hwnd.is_null() && (*ptr).pacer.due(Instant::now()) {
                 InvalidateRect((*ptr).hwnd, null(), 0);
@@ -915,6 +942,7 @@ unsafe fn notify_resize(ptr: *mut WindowState) {
     if let Some(app) = (*ptr).app.as_mut() {
         app.resize(width, height, scale);
     }
+    text_editor::sync(ptr);
     request_redraw(ptr);
 }
 
@@ -958,6 +986,7 @@ unsafe fn dispatch(ptr: *mut WindowState, event: Event) {
             None => Vec::new(),
         }
     };
+    text_editor::sync(ptr);
     for effect in effects {
         apply_effect(ptr, effect);
     }
@@ -1065,30 +1094,12 @@ unsafe fn apply_effect(ptr: *mut WindowState, effect: Effect) {
                 }
             }
         }
-        Effect::EditTextLayer {
-            document,
-            target,
-            width,
-            height,
-            text,
-        } => match text_editor::open(hwnd, text, width, height, language) {
-            Ok(Some((text, pixels))) => dispatch(
-                ptr,
-                Event::TextLayerEdited {
-                    document,
-                    target,
-                    text,
-                    pixels,
-                },
-            ),
-            Ok(None) => {}
-            Err(error) => show_message(
-                hwnd,
-                &language.translate("Текст на холсте"),
-                &language.translate(&error),
-                true,
-            ),
-        },
+        Effect::FocusCanvasText => {
+            let input = (*ptr).canvas_input.hwnd;
+            if !input.is_null() {
+                SetFocus(input);
+            }
+        }
         Effect::CopyText(text) => {
             if let Err(error) = copy_text(hwnd, &text) {
                 show_message(
@@ -1180,6 +1191,12 @@ unsafe fn window_proc_inner(hwnd: Hwnd, message: u32, wparam: Wparam, lparam: Lp
         return DefWindowProcW(hwnd, message, wparam, lparam);
     }
     match message {
+        0x0111 if lparam != 0 && lparam as Hwnd == (*ptr).canvas_input.hwnd => {
+            if wparam >> 16 == 0x0300 {
+                text_editor::changed(ptr);
+            } // EN_CHANGE
+            0
+        }
         WM_DROPFILES => {
             // The HDROP guard finishes before app dispatch or a modal message.
             match dropped_paths(wparam as Handle) {
@@ -1377,7 +1394,9 @@ unsafe fn window_proc_inner(hwnd: Hwnd, message: u32, wparam: Wparam, lparam: Lp
             if GetCapture() == hwnd {
                 ReleaseCapture();
             }
-            dispatch(ptr, Event::FocusLost);
+            if wparam as Hwnd != (*ptr).canvas_input.hwnd || wparam == 0 {
+                dispatch(ptr, Event::FocusLost);
+            }
             0
         }
         WM_TIMER => {
@@ -1591,6 +1610,9 @@ unsafe fn paint(ptr: *mut WindowState) {
         );
     }
     drop(guard);
+    if !(*ptr).canvas_input.hwnd.is_null() {
+        InvalidateRect((*ptr).canvas_input.hwnd, null(), 0);
+    }
     sync_timer(ptr);
     if let Some(error) = error {
         let language = locale(ptr);

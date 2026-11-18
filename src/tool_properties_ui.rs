@@ -5,13 +5,17 @@ use super::*;
 #[derive(Default)]
 pub(super) struct ToolPropertiesUi {
     pub name_edit: Option<crate::tool_browser::SearchText>,
-    pub active_section: [u8; 4],
-    pub scrolls: [[crate::tool_browser::Scroll; 3]; 4],
+    pub active_section: [u8; 5],
+    pub scrolls: [[crate::tool_browser::Scroll; 3]; 5],
 }
 
 impl PortfolioApp {
     fn tool_settings_family_index(&self) -> usize {
-        ToolPanel::for_tool(self.tool).map_or(3, ToolPanel::index)
+        if self.tool == Tool::Text {
+            4
+        } else {
+            ToolPanel::for_tool(self.tool).map_or(3, ToolPanel::index)
+        }
     }
 
     fn tool_settings_brushes(&self) -> bool {
@@ -21,7 +25,7 @@ impl PortfolioApp {
     fn tool_settings_section_count(&self) -> u8 {
         if self.tool_settings_brushes() {
             3
-        } else if self.tool == Tool::Fill {
+        } else if matches!(self.tool, Tool::Fill | Tool::Text) {
             1
         } else {
             2
@@ -79,15 +83,21 @@ impl PortfolioApp {
     }
 
     fn tool_settings_content_height(&self) -> f32 {
+        if self.tool == Tool::Text {
+            return 253.;
+        }
         28. + 54. * self.section_actions(self.tool_settings_section()).len() as f32
     }
 
     pub(super) fn tool_settings_rect(&self) -> Rect {
         let left = 16.;
-        let width = (self.w() - 336.)
-            .clamp(360., 448.)
-            .min((self.w() - 32.).max(0.));
-        let preferred_height: f32 = if self.tool_settings_brushes() {
+        let width = if self.tool == Tool::Text {
+            (self.w() * 0.32).clamp(328., 400.)
+        } else {
+            (self.w() - 336.).clamp(360., 448.)
+        }
+        .min((self.w() - 32.).max(0.));
+        let preferred_height: f32 = if self.tool_settings_brushes() || self.tool == Tool::Text {
             384.
         } else if self.tool == Tool::Fill {
             192.
@@ -149,6 +159,9 @@ impl PortfolioApp {
 
     pub(super) fn tool_settings_viewport(&self) -> Rect {
         let panel = self.tool_settings_rect();
+        if self.tool == Tool::Text {
+            return Rect::new(panel.x + 16., panel.y + 54., panel.w - 32., panel.h - 106.);
+        }
         let (header, footer) = if self.tool_settings_brushes() {
             (78., 64.)
         } else {
@@ -267,6 +280,11 @@ impl PortfolioApp {
     }
 
     pub(super) fn tool_settings_reveal_action(&mut self, action: Action) -> bool {
+        let action = if let Action::ResetSlider(slider) = action {
+            slider.action()
+        } else {
+            action
+        };
         if let Action::BrushDetail(detail) = action {
             if !self.tool_settings_brushes() {
                 return false;
@@ -289,6 +307,19 @@ impl PortfolioApp {
             }
             _ => {}
         }
+        if self.tool == Tool::Text {
+            if let Some(index) = Self::text_row(action) {
+                self.prepare_tool_settings_layout();
+                let y = Self::TEXT_ROWS[index];
+                let family = self.tool_settings_family_index();
+                if self.tool_properties_ui.scrolls[family][0]
+                    .ensure_visible(y, y + if index == 1 { 46. } else { 30. })
+                {
+                    self.invalidate_tool_settings_geometry();
+                }
+            }
+            return self.text_focus_order().contains(&action);
+        }
         let Some(section) = self.tool_settings_action_section(action) else {
             return false;
         };
@@ -307,12 +338,20 @@ impl PortfolioApp {
     }
 
     pub(super) fn tool_settings_focus_order(&self) -> Vec<Action> {
+        if self.tool == Tool::Text {
+            return self.text_focus_order();
+        }
         let mut actions = vec![Action::CloseToolProperties];
         if self.tool_settings_brushes() {
             actions.extend([Action::RenameBrush, Action::AddBrush]);
         }
         actions.extend((0..self.tool_settings_section_count()).map(Action::ToolSection));
-        actions.extend_from_slice(self.section_actions(self.tool_settings_section()));
+        for &action in self.section_actions(self.tool_settings_section()) {
+            actions.push(action);
+            if let Some(slider) = Slider::for_action(action) {
+                actions.push(Action::ResetSlider(slider));
+            }
+        }
         if self.tool_settings_content_height() > self.tool_settings_viewport().h {
             actions.push(Action::ToolPropertiesScroll);
         }
@@ -415,6 +454,13 @@ impl PortfolioApp {
         }
 
         let body = self.tool_settings_viewport();
+        if self.tool == Tool::Text {
+            self.draw_text_settings(p, panel, body);
+            self.draw_tool_scrollbar(p);
+            self.hit_clip = None;
+            p.clip = Rect::new(0., 0., self.w(), self.h());
+            return;
+        }
         let section = self.tool_settings_section();
         for index in 0..self.tool_settings_section_count() {
             let row = Rect::new(panel.x + 12., body.y + index as f32 * 34., 104., 32.);
@@ -475,28 +521,7 @@ impl PortfolioApp {
 
         p.clip = panel.inset(1.);
         self.hit_clip = Some(p.clip);
-        if self.tool_settings_scroll().max() > 0. {
-            let track = self.tool_settings_scrollbar_track();
-            let thumb = self.tool_settings_scrollbar_thumb();
-            let focused = self.focus == Some(self.controls.len());
-            let hovered = self.hover == Some(self.controls.len());
-            p.rounded(Rect::new(track.x + 3., track.y, 4., track.h), 2., t.raised);
-            p.rounded(
-                Rect::new(thumb.x + 2., thumb.y, 6., thumb.h),
-                3.,
-                if hovered || focused {
-                    t.accent
-                } else {
-                    t.muted
-                },
-            );
-            self.control(
-                track,
-                Action::ToolPropertiesScroll,
-                "Прокрутить параметры",
-                true,
-            );
-        }
+        self.draw_tool_scrollbar(p);
         if brushes {
             self.button(
                 p,
@@ -524,6 +549,32 @@ impl PortfolioApp {
         );
         self.hit_clip = None;
         p.clip = Rect::new(0., 0., self.w(), self.h());
+    }
+
+    fn draw_tool_scrollbar(&mut self, p: &mut Painter) {
+        let t = Theme::with_accent(self.dark, self.accent);
+        if self.tool_settings_scroll().max() > 0. {
+            let track = self.tool_settings_scrollbar_track();
+            let thumb = self.tool_settings_scrollbar_thumb();
+            let focused = self.focus == Some(self.controls.len());
+            let hovered = self.hover == Some(self.controls.len());
+            p.rounded(Rect::new(track.x + 3., track.y, 4., track.h), 2., t.raised);
+            p.rounded(
+                Rect::new(thumb.x + 2., thumb.y, 6., thumb.h),
+                3.,
+                if hovered || focused {
+                    t.accent
+                } else {
+                    t.muted
+                },
+            );
+            self.control(
+                track,
+                Action::ToolPropertiesScroll,
+                "Прокрутить параметры",
+                true,
+            );
+        }
     }
 
     fn preset_sample_rect(&self) -> Rect {
