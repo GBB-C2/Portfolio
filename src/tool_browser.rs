@@ -450,7 +450,7 @@ impl SearchText {
         from + self.text[from..].chars().next().map_or(0, char::len_utf8)
     }
 
-    fn move_to(&mut self, byte: usize, extend: bool) -> bool {
+    pub(crate) fn move_to(&mut self, byte: usize, extend: bool) -> bool {
         let previous = (self.caret, self.anchor);
         self.caret = byte;
         if !extend {
@@ -519,9 +519,6 @@ impl Browser {
     }
 
     pub fn filtered_ids(&self, family: Family, language: Language) -> Vec<ItemId> {
-        let view = self.view(family);
-        let query = fold(view.query.text());
-        let tokens: Vec<_> = query.split_whitespace().collect();
         let ids: Vec<_> = match family {
             Family::Brush => BrushKind::ALL.into_iter().map(ItemId::Brush).collect(),
             Family::Eraser => BrushKind::ALL.into_iter().map(ItemId::Eraser).collect(),
@@ -530,8 +527,20 @@ impl Browser {
                 .map(ItemId::Shape)
                 .collect(),
         };
-        ids.into_iter()
-            .filter(|&id| {
+        self.filter_items(family, language, ids.into_iter().map(|id| (id, id, "")))
+    }
+
+    pub(crate) fn filter_items<'a, T>(
+        &self,
+        family: Family,
+        language: Language,
+        items: impl Iterator<Item = (T, ItemId, &'a str)>,
+    ) -> Vec<T> {
+        let view = self.view(family);
+        let query = fold(view.query.text());
+        let tokens: Vec<_> = query.split_whitespace().collect();
+        items
+            .filter(|&(_, id, custom_name)| {
                 if !view.category.contains(id) {
                     return false;
                 }
@@ -539,7 +548,8 @@ impl Browser {
                     return true;
                 }
                 let mut names = fold(&format!(
-                    "{} {} {}",
+                    "{} {} {} {}",
+                    custom_name,
                     id.label(),
                     language.translate(id.label()),
                     id.aliases()
@@ -558,6 +568,7 @@ impl Browser {
                 }
                 tokens.iter().all(|token| names.contains(token))
             })
+            .map(|(item, _, _)| item)
             .collect()
     }
 }

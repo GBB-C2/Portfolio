@@ -18,6 +18,11 @@ pub const HISTORY_BYTES: usize = 128 * 1024 * 1024;
 pub const MAX_HISTORY_STEPS: usize = 256;
 const TILE_SIZE: usize = 64;
 const MAX_FILE_BYTES: u64 = (MAX_LAYER_PIXELS * 4 + 1024 * 1024) as u64;
+#[path = "document_text.rs"]
+mod document_text;
+pub use document_text::{ParagraphAlign, TextLayer};
+
+const TEXT_MAGIC: &[u8; 8] = b"PRTFOL02";
 const MAGIC: &[u8; 8] = b"PRTFOL01";
 
 #[repr(C)]
@@ -105,6 +110,7 @@ pub fn blend(dst: Color, src: Color, coverage: u8) -> Color {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Layer {
+    pub text: Option<TextLayer>,
     pub id: u64,
     pub name: String,
     pub visible: bool,
@@ -165,6 +171,8 @@ pub struct Brush {
     pub spacing: f32,
     pub angle: f32,
     pub scatter: f32,
+    pub roundness: f32,
+    pub grain: f32,
     pub kind: BrushKind,
     pub erase: bool,
     pub mirror: bool,
@@ -181,6 +189,8 @@ impl Default for Brush {
             spacing: 0.12,
             angle: 0.0,
             scatter: 0.0,
+            roundness: 1.0,
+            grain: 0.0,
             kind: BrushKind::Ink,
             erase: false,
             mirror: false,
@@ -216,6 +226,8 @@ impl Brush {
             } else {
                 0.0
             },
+            roundness: finite(self.roundness, 1.0, 0.1, 1.0),
+            grain: finite(self.grain, 0.0, 0.0, 1.0),
             scatter: finite(self.scatter, 0.0, 0.0, 1.0),
             ..self
         }
@@ -232,6 +244,7 @@ struct Snapshot {
 
 #[derive(Clone)]
 struct LayerMetadata {
+    text: Option<TextLayer>,
     id: u64,
     name: String,
     visible: bool,
@@ -253,6 +266,7 @@ impl StateMetadata {
             layers: layers
                 .iter()
                 .map(|l| LayerMetadata {
+                    text: l.text.clone(),
                     id: l.id,
                     name: l.name.clone(),
                     visible: l.visible,
@@ -267,7 +281,18 @@ impl StateMetadata {
     }
 
     fn bytes(&self) -> usize {
-        self.layers.iter().map(|l| l.name.len() + 64).sum::<usize>() + self.title.len() + 64
+        self.layers
+            .iter()
+            .map(|l| {
+                l.name.len()
+                    + l.text
+                        .as_ref()
+                        .map_or(0, |t| t.body.len() + t.font.len() + 48)
+                    + 64
+            })
+            .sum::<usize>()
+            + self.title.len()
+            + 64
     }
 
     fn differs(&self, layers: &[Layer], title: &str) -> bool {
@@ -275,6 +300,7 @@ impl StateMetadata {
             || self.layers.len() != layers.len()
             || self.layers.iter().zip(layers).any(|(a, b)| {
                 a.id != b.id
+                    || a.text != b.text
                     || a.name != b.name
                     || a.visible != b.visible
                     || a.locked != b.locked
@@ -293,6 +319,7 @@ impl StateMetadata {
         });
         for layer in layers {
             if let Some(meta) = self.layers.iter().find(|meta| meta.id == layer.id) {
+                layer.text.clone_from(&meta.text);
                 layer.name.clone_from(&meta.name);
                 layer.visible = meta.visible;
                 layer.locked = meta.locked;
@@ -423,6 +450,7 @@ impl HistoryEntry {
                 }
             }
             restored.push(Layer {
+                text: meta.text.clone(),
                 id: meta.id,
                 name: meta.name.clone(),
                 visible: meta.visible,
@@ -651,9 +679,14 @@ impl BrushMask {
                 let dx = x as f32 + 0.5 - center;
                 let dy = y as f32 + 0.5 - center;
                 let u = cos * dx + sin * dy;
-                let v = -sin * dx + cos * dy;
-                let radial = dx.hypot(dy) / radius.max(0.5);
-                let aa = (radius + 0.5 - dx.hypot(dy)).clamp(0.0, 1.0);
+                let v = (-sin * dx + cos * dy) / brush.roundness;
+                let distance = if brush.roundness == 1.0 {
+                    dx.hypot(dy)
+                } else {
+                    u.hypot(v)
+                };
+                let radial = distance / radius.max(0.5);
+                let aa = (radius + 0.5 - distance).clamp(0.0, 1.0);
                 let softness = if radial <= brush.hardness || brush.hardness >= 0.999 {
                     1.0
                 } else {
@@ -710,6 +743,7 @@ impl BrushMask {
                             * (0.72 + grain(u.floor() as i32, 0, 91) * 0.28)
                     }
                 };
+                let value = value * (1.0 - brush.grain * noise);
                 coverage[y * side + x] = (value * 255.0 + 0.5).clamp(0.0, 255.0) as u8;
             }
         }
@@ -917,6 +951,7 @@ impl Document {
             width,
             height,
             layers: vec![Layer {
+                text: None,
                 id: 1,
                 name: "Слой 1".into(),
                 visible: true,
@@ -969,7 +1004,7 @@ impl Document {
     pub fn can_paint(&self) -> bool {
         self.layers
             .get(self.active)
-            .is_some_and(|l| !l.locked && l.visible)
+            .is_some_and(|l| !l.locked && l.visible && l.text.is_none())
     }
 
     fn ensure_paintable(&self) -> Result<(), String> {
@@ -980,6 +1015,8 @@ impl Document {
         }
         if layer.locked {
             Err("Слой заблокирован. Снимите блокировку или выберите другой слой.".into())
+        } else if layer.text.is_some() {
+            Err("Для рисования выберите растровый слой.".into())
         } else if !layer.visible {
             Err("Слой скрыт. Включите его видимость перед рисованием.".into())
         } else {
@@ -1090,6 +1127,7 @@ impl Document {
             || before.layers.len() != self.layers.len()
             || before.layers.iter().zip(&self.layers).any(|(a, b)| {
                 a.id != b.id
+                    || a.text != b.text
                     || a.name != b.name
                     || a.visible != b.visible
                     || a.locked != b.locked
@@ -1346,6 +1384,7 @@ impl Document {
         self.layers.insert(
             at,
             Layer {
+                text: None,
                 id: self.next_layer_id,
                 name,
                 visible: true,
@@ -2355,6 +2394,7 @@ impl Document {
                 .map_err(|_| "Недостаточно памяти для копии документа.")?;
             pixels.extend_from_slice(&layer.pixels);
             layers.push(Layer {
+                text: layer.text.clone(),
                 id: layer.id,
                 name: layer.name.clone(),
                 visible: layer.visible,
@@ -2423,7 +2463,11 @@ impl Document {
         let mut bytes = Vec::with_capacity(
             self.layers.len() * self.width as usize * self.height as usize * 4 + 2048,
         );
-        bytes.extend_from_slice(MAGIC);
+        bytes.extend_from_slice(if self.layers.iter().any(|l| l.text.is_some()) {
+            TEXT_MAGIC
+        } else {
+            MAGIC
+        });
         push_u32(&mut bytes, self.width);
         push_u32(&mut bytes, self.height);
         push_u32(&mut bytes, self.layers.len() as u32);
@@ -2431,8 +2475,16 @@ impl Document {
         push_string(&mut bytes, &self.title);
         for layer in &self.layers {
             bytes.extend_from_slice(&layer.id.to_le_bytes());
-            bytes.extend_from_slice(&[layer.visible as u8, layer.locked as u8, layer.opacity, 0]);
+            bytes.extend_from_slice(&[
+                layer.visible as u8,
+                layer.locked as u8,
+                layer.opacity,
+                layer.text.is_some() as u8,
+            ]);
             push_string(&mut bytes, &layer.name);
+            if let Some(text) = &layer.text {
+                text.write(&mut bytes);
+            }
             for p in &layer.pixels {
                 bytes.extend_from_slice(&[p.r, p.g, p.b, p.a]);
             }
@@ -2456,8 +2508,9 @@ impl Document {
             return Err("Файл повреждён: контрольная сумма не совпадает.".into());
         }
         let mut reader = Reader::new(&bytes[..checksum_at]);
-        if reader.take(8)? != MAGIC {
-            return Err("Это не поддерживаемый файл Portfolio версии 1.".into());
+        let version = reader.take(8)?;
+        if version != MAGIC && version != TEXT_MAGIC {
+            return Err("Неизвестная версия файла Portfolio.".into());
         }
         let width = reader.u32()?;
         let height = reader.u32()?;
@@ -2481,11 +2534,16 @@ impl Document {
             }
             max_id = max_id.max(id);
             let flags = reader.take(4)?;
-            if flags[0] > 1 || flags[1] > 1 || flags[3] != 0 {
+            if flags[0] > 1 || flags[1] > 1 || flags[3] > u8::from(version == TEXT_MAGIC) {
                 return Err("Повреждены параметры слоя.".into());
             }
             let (visible, locked, opacity) = (flags[0] != 0, flags[1] != 0, flags[2]);
             let name = reader.string(512)?;
+            let text = if flags[3] == 1 {
+                Some(TextLayer::read(&mut reader, width, height)?)
+            } else {
+                None
+            };
             let data = reader.take(count * 4)?;
             let mut pixels = Vec::new();
             pixels
@@ -2495,6 +2553,7 @@ impl Document {
                 pixels.push(Color::rgba(rgba[0], rgba[1], rgba[2], rgba[3]));
             }
             layers.push(Layer {
+                text,
                 id,
                 name,
                 visible,
@@ -2529,6 +2588,9 @@ impl Document {
             return Err("Слишком длинное название документа.".into());
         }
         for layer in &self.layers {
+            if let Some(text) = &layer.text {
+                text.validate(self.width, self.height)?;
+            }
             if layer.pixels.len() != count
                 || layer.name.len() > 512
                 || layer.id == 0
@@ -2669,17 +2731,21 @@ impl<'a> Reader<'a> {
     fn u64(&mut self) -> Result<u64, String> {
         Ok(u64::from_le_bytes(self.take(8)?.try_into().unwrap()))
     }
-    fn string(&mut self, max_bytes: usize) -> Result<String, String> {
+    fn utf8(&mut self, max_bytes: usize) -> Result<String, String> {
         let size = self.u32()? as usize;
         if size > max_bytes {
             return Err("Недопустимая длина текста в файле.".into());
         }
         let bytes = self.take(size)?;
         let value = std::str::from_utf8(bytes).map_err(|_| "В файле повреждён текст UTF-8.")?;
+        Ok(value.to_owned())
+    }
+    fn string(&mut self, max_bytes: usize) -> Result<String, String> {
+        let value = self.utf8(max_bytes)?;
         if value.chars().any(|c| c.is_control()) {
             return Err("В названии обнаружены управляющие символы.".into());
         }
-        Ok(value.to_owned())
+        Ok(value)
     }
     fn remaining(&self) -> &'a [u8] {
         &self.data[self.at..]

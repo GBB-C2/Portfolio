@@ -4,6 +4,7 @@ use super::*;
 
 #[derive(Default)]
 pub(super) struct ToolPropertiesUi {
+    pub name_edit: Option<crate::tool_browser::SearchText>,
     pub active_section: [u8; 4],
     pub scrolls: [[crate::tool_browser::Scroll; 3]; 4],
 }
@@ -50,25 +51,35 @@ impl PortfolioApp {
         match section {
             1 if self.tool_settings_brushes() => "Отпечаток",
             1 => "Заливка",
-            2 => "Образец",
+            2 => "Штрих",
             _ => "Основные",
         }
     }
 
-    fn tool_settings_content_height(&self) -> f32 {
+    fn section_actions(&self, section: u8) -> &'static [Action] {
+        use Action::{
+            Angle, Flow, Grain, Hardness, Opacity, Roundness, Scatter, ShapeFill, Size, Spacing,
+        };
         if self.tool_settings_brushes() {
-            match self.tool_settings_section() {
-                0 => 244.,
-                1 => 190.,
-                _ => 146.,
+            match section {
+                0 => &[Size, Opacity, Hardness],
+                1 => &[Roundness, Angle, Hardness, Grain, Spacing, Scatter],
+                2 => &[Opacity, Flow, Spacing, Scatter],
+                _ => &[],
             }
         } else if self.tool == Tool::Fill {
-            84.
-        } else if self.tool_settings_section() == 0 {
-            136.
+            &[Opacity]
+        } else if section == 0 {
+            &[Size, Opacity]
+        } else if matches!(self.tool, Tool::Rectangle | Tool::Ellipse) {
+            &[ShapeFill]
         } else {
-            76.
+            &[]
         }
+    }
+
+    fn tool_settings_content_height(&self) -> f32 {
+        28. + 54. * self.section_actions(self.tool_settings_section()).len() as f32
     }
 
     pub(super) fn tool_settings_rect(&self) -> Rect {
@@ -139,7 +150,7 @@ impl PortfolioApp {
     pub(super) fn tool_settings_viewport(&self) -> Rect {
         let panel = self.tool_settings_rect();
         let (header, footer) = if self.tool_settings_brushes() {
-            (68., 64.)
+            (78., 64.)
         } else {
             (60., 28.)
         };
@@ -230,52 +241,29 @@ impl PortfolioApp {
     }
 
     fn tool_settings_action_section(&self, action: Action) -> Option<u8> {
-        if self.tool_settings_brushes() {
-            match action {
-                Action::Size | Action::Opacity | Action::Hardness | Action::Flow => Some(0),
-                Action::Spacing | Action::Angle | Action::Scatter => Some(1),
-                _ => None,
-            }
-        } else if self.tool == Tool::Fill {
-            (action == Action::Opacity).then_some(0)
-        } else {
-            match action {
-                Action::Size | Action::Opacity => Some(0),
-                Action::ShapeFill => Some(1),
-                _ => None,
-            }
+        let current = self.tool_settings_section();
+        if self.section_actions(current).contains(&action) {
+            return Some(current);
         }
+        (0..self.tool_settings_section_count())
+            .find(|&section| self.section_actions(section).contains(&action))
     }
 
     fn tool_settings_action_span(&self, action: Action) -> Option<(f32, f32)> {
-        if self.tool_settings_action_section(action)? != self.tool_settings_section() {
-            return None;
-        }
-        let start = if self.tool_settings_brushes() {
-            match action {
-                Action::Size => 28.,
-                Action::Opacity => 82.,
-                Action::Hardness => 136.,
-                Action::Flow => 190.,
-                Action::Spacing => 28.,
-                Action::Angle => 82.,
-                Action::Scatter => 136.,
-                _ => return None,
-            }
-        } else if self.tool == Tool::Fill {
-            match action {
-                Action::Opacity => 28.,
-                _ => return None,
-            }
-        } else {
-            match action {
-                Action::Size => 28.,
-                Action::Opacity => 82.,
-                Action::ShapeFill => return Some((28., 68.)),
-                _ => return None,
-            }
-        };
-        Some((start, start + 46.))
+        let index = self
+            .section_actions(self.tool_settings_section())
+            .iter()
+            .position(|a| *a == action)?;
+        let start = 28. + 54. * index as f32;
+        Some((
+            start,
+            start
+                + if action == Action::ShapeFill {
+                    40.
+                } else {
+                    46.
+                },
+        ))
     }
 
     pub(super) fn tool_settings_reveal_action(&mut self, action: Action) -> bool {
@@ -288,7 +276,9 @@ impl PortfolioApp {
         }
         match action {
             Action::CloseToolProperties => return true,
-            Action::ResetBrush => return self.tool_settings_brushes(),
+            Action::RenameBrush | Action::AddBrush | Action::ResetBrush => {
+                return self.tool_settings_brushes()
+            }
             Action::ToolSection(section) => return section < self.tool_settings_section_count(),
             Action::ToolPropertiesScroll => {
                 self.prepare_tool_settings_layout();
@@ -318,27 +308,11 @@ impl PortfolioApp {
 
     pub(super) fn tool_settings_focus_order(&self) -> Vec<Action> {
         let mut actions = vec![Action::CloseToolProperties];
-        actions.extend((0..self.tool_settings_section_count()).map(Action::ToolSection));
         if self.tool_settings_brushes() {
-            match self.tool_settings_section() {
-                0 => actions.extend([
-                    Action::Size,
-                    Action::Opacity,
-                    Action::Hardness,
-                    Action::Flow,
-                ]),
-                1 => actions.extend([Action::Spacing, Action::Angle, Action::Scatter]),
-                _ => {}
-            }
-        } else if self.tool == Tool::Fill {
-            actions.push(Action::Opacity);
-        } else {
-            if self.tool_settings_section() == 0 {
-                actions.extend([Action::Size, Action::Opacity]);
-            } else if matches!(self.tool, Tool::Rectangle | Tool::Ellipse) {
-                actions.push(Action::ShapeFill);
-            }
+            actions.extend([Action::RenameBrush, Action::AddBrush]);
         }
+        actions.extend((0..self.tool_settings_section_count()).map(Action::ToolSection));
+        actions.extend_from_slice(self.section_actions(self.tool_settings_section()));
         if self.tool_settings_content_height() > self.tool_settings_viewport().h {
             actions.push(Action::ToolPropertiesScroll);
         }
@@ -437,18 +411,7 @@ impl PortfolioApp {
         );
         let brushes = self.tool_settings_brushes();
         if brushes {
-            p.label(
-                panel.x + 20.,
-                panel.y + 44.,
-                panel.w - 40.,
-                if self.tool == Tool::Eraser {
-                    ItemId::Eraser(self.brush.kind).label()
-                } else {
-                    ItemId::Brush(self.brush.kind).label()
-                },
-                11.,
-                t.muted,
-            );
+            self.draw_preset_header(p);
         }
 
         let body = self.tool_settings_viewport();
@@ -487,24 +450,7 @@ impl PortfolioApp {
         p.clip = body;
         self.hit_clip = Some(body);
         self.draw_tool_settings_heading(p, origin, self.tool_settings_section_label(section));
-        let actions: &[Action] = if brushes {
-            match section {
-                0 => &[
-                    Action::Size,
-                    Action::Opacity,
-                    Action::Hardness,
-                    Action::Flow,
-                ],
-                1 => &[Action::Spacing, Action::Angle, Action::Scatter],
-                _ => &[],
-            }
-        } else if self.tool == Tool::Fill {
-            &[Action::Opacity]
-        } else if section == 0 {
-            &[Action::Size, Action::Opacity]
-        } else {
-            &[]
-        };
+        let actions = self.section_actions(section);
         let row_width = (body.w
             - if self.tool_settings_scroll().max() > 0. {
                 14.
@@ -516,15 +462,14 @@ impl PortfolioApp {
             let (start, _) = self.tool_settings_action_span(action).unwrap();
             let row = Rect::new(body.x, origin + start, row_width, 46.);
             if row.intersects(body) {
-                self.parameter_slider(p, row, action);
+                if action == Action::ShapeFill {
+                    self.draw_shape_fill_switch(p, Rect::new(row.x, row.y, row.w, 40.));
+                } else {
+                    self.parameter_slider(p, row, action);
+                }
             }
         }
-        if brushes && section == 2 {
-            let sample_rect = Rect::new(body.x, origin + 28., row_width, row_width * 40. / 112.);
-            if sample_rect.intersects(body) {
-                self.draw_brush_sample(p, sample_rect, t.text);
-            }
-        } else if !brushes && self.tool != Tool::Fill && section == 1 {
+        if self.tool == Tool::Line && section == 1 {
             self.draw_shape_fill_switch(p, Rect::new(body.x, origin + 28., row_width, 40.));
         }
 
@@ -579,6 +524,96 @@ impl PortfolioApp {
         );
         self.hit_clip = None;
         p.clip = Rect::new(0., 0., self.w(), self.h());
+    }
+
+    fn preset_sample_rect(&self) -> Rect {
+        let panel = self.tool_settings_rect();
+        let width = (panel.w * 0.26).clamp(72., 112.);
+        Rect::new(panel.x + panel.w - 54. - width, panel.y + 24., width, 40.)
+    }
+
+    pub(super) fn preset_name_rect(&self) -> Rect {
+        let panel = self.tool_settings_rect();
+        let left = panel.x + 16.;
+        let room = (self.preset_sample_rect().x - left - 72.).max(32.);
+        let f = self.preset_family().unwrap_or(0);
+        let name = self.preset_name(f, self.presets.selected[f]);
+        let width = if self.tool_properties_ui.name_edit.is_some() {
+            room
+        } else {
+            (self.browser_text_width(&name) + 22.).clamp(32., room)
+        };
+        Rect::new(left, panel.y + 41., width, 28.)
+    }
+
+    fn draw_preset_header(&mut self, p: &mut Painter) {
+        let t = Theme::with_accent(self.dark, self.accent);
+        let f = self.preset_family().unwrap();
+        let r = self.preset_name_rect();
+        let sample = self.preset_sample_rect();
+        p.text(
+            Rect::new(sample.x, sample.y - 18., sample.w, 16.),
+            "Образец",
+            10.,
+            t.muted,
+            false,
+            false,
+            TextAlign::Left,
+        );
+        let color = if f == 1 {
+            t.text
+        } else {
+            rgb(self.brush.color)
+        };
+        let c = self.brush.color;
+        let light_ink = u32::from(c.r) * 299 + u32::from(c.g) * 587 + u32::from(c.b) * 114 > 150000;
+        p.rounded(sample, 4., if light_ink { 0x36383b } else { 0xe6e5e2 });
+        self.draw_brush_sample(p, sample.inset(2.), color);
+
+        let editing = self.tool_properties_ui.name_edit.is_some();
+        if let Some(input) = &self.tool_properties_ui.name_edit {
+            p.rounded(r, 4., t.accent);
+            p.rounded(r.inset(1.), 3., t.raised);
+            self.draw_inline_text(p, r.inset(4.), input, true);
+        } else {
+            p.text_raw(
+                r.inset(3.),
+                self.preset_name(f, self.presets.selected[f]),
+                12.,
+                t.text,
+                false,
+                false,
+                TextAlign::Left,
+            );
+        }
+        self.icon_button(
+            p,
+            Rect::new(r.x + r.w + 2., r.y, 28., 28.),
+            Action::RenameBrush,
+            if editing { "check" } else { "pencil" },
+            if editing {
+                "Сохранить название"
+            } else if f == 1 {
+                "Переименовать ластик"
+            } else {
+                "Переименовать кисть"
+            },
+            editing,
+            !self.busy,
+        );
+        self.icon_button(
+            p,
+            Rect::new(r.x + r.w + 33., r.y, 28., 28.),
+            Action::AddBrush,
+            "plus",
+            if f == 1 {
+                "Создать копию ластика"
+            } else {
+                "Создать копию кисти"
+            },
+            false,
+            !self.busy && self.presets.entries[f].len() <= u8::MAX as usize,
+        );
     }
 
     fn draw_tool_settings_heading(&self, p: &mut Painter, y: f32, label: &str) {
