@@ -579,7 +579,7 @@ fn browser_wheel_scrolls_two_clipped_rows_continuously_without_changing_art_or_v
             let categories = app.browser_categories_rect(family);
             for control in app.controls.iter().filter(|c| c.enabled) {
                 let area = match control.action {
-                    Action::Brush(_) | Action::Shape(_) => items,
+                    Action::Brush(_) | Action::Shape(_) | Action::TextPreset(_) => items,
                     Action::BrowserCategory(Category::All) => app.browser_all_category_rect(family),
                     Action::BrowserCategory(_) => categories,
                     _ => continue,
@@ -615,6 +615,12 @@ fn browser_clicks_select_on_release_but_dragging_either_row_never_selects_or_pai
             click_action(&mut app, Action::ToolPanel(family));
             let initial_option = app.selected_tool_option();
             let action = match row {
+                BrowserRow::Items if family == ToolPanel::Text => {
+                    Action::TextPreset(TextPreset::Caption)
+                }
+                BrowserRow::Categories if family == ToolPanel::Text => {
+                    Action::BrowserCategory(Category::Titles)
+                }
                 BrowserRow::Items if family == ToolPanel::Shapes => Action::Shape(Tool::Line),
                 BrowserRow::Items => Action::Brush(1),
                 BrowserRow::Categories if family == ToolPanel::Shapes => {
@@ -644,6 +650,9 @@ fn browser_clicks_select_on_release_but_dragging_either_row_never_selects_or_pai
             }
             let selected = app.selected_tool_option();
             let drag_action = match row {
+                BrowserRow::Items if family == ToolPanel::Text => {
+                    Action::TextPreset(TextPreset::Heading)
+                }
                 BrowserRow::Items if family == ToolPanel::Shapes => Action::Shape(Tool::Rectangle),
                 BrowserRow::Items => Action::Brush(2),
                 BrowserRow::Categories => action,
@@ -5311,9 +5320,11 @@ fn anchor_raster(text: &TextLayer, w: u32, h: u32, _: Language) -> Result<Vec<Co
 fn canvas_text_creation_and_reediting_use_document_coordinates_and_one_undo_step() {
     let mut app = floating_panel_fixture();
     app.text_renderer = anchor_raster;
-    click_action(&mut app, Action::Tool(Tool::Text));
+    click_action(&mut app, Action::ToolPanel(ToolPanel::Text));
+    assert_eq!(app.tool_popup, Some(ToolPanel::Text));
+    assert!(app.quick_controls_visible());
+    click_action(&mut app, Action::ToolProperties);
     assert!(app.tool_settings_visible());
-    assert!(!app.quick_controls_visible());
     let (x, y) = (810., 650.);
     let (dx, dy) = app.doc_point(x, y);
     let place = |app: &mut PortfolioApp| {
@@ -5496,6 +5507,7 @@ fn each_full_size_slider_resets_only_its_parameter() {
     app.activate(Action::ResetSlider(Slider::FontSize), &mut Vec::new());
     assert_eq!(app.font_size, Appearance::default().font_size);
     press_key(&mut app, 84, false);
+    click_action(&mut app, Action::ToolProperties);
     app.set_parameter(Action::TextSize, 400.);
     click_action(&mut app, Action::ResetSlider(Slider::TextSize));
     assert_eq!(app.current_text().size, 48);
@@ -5510,4 +5522,107 @@ fn each_full_size_slider_resets_only_its_parameter() {
             && c.action != Action::NoOp
             && bar.contains(c.hit.x + c.hit.w / 2., c.hit.y + c.hit.h / 2.))
         .all(|c| c.hit.x + c.hit.w <= grip.x));
+}
+
+#[test]
+fn text_catalog_basics_and_gear_edit_one_canvas_draft_without_touching_brush_controls() {
+    let mut app = floating_panel_fixture();
+    let brush = app.brush;
+    click_action(&mut app, Action::ToolPanel(ToolPanel::Text));
+    assert_eq!(app.tool_popup, Some(ToolPanel::Text));
+    assert!(!app.tool_settings_visible());
+    assert!(app.quick_controls_visible());
+    app.render();
+    let bar = app.quick_controls_rect();
+    assert!(app.controls.iter().any(|c| c.enabled
+        && c.action == Action::TextBold
+        && bar.contains(c.hit.x + 1., c.hit.y + 1.)));
+    assert!(app
+        .controls
+        .iter()
+        .filter(|c| c.enabled && bar.contains(c.hit.x + 1., c.hit.y + 1.))
+        .all(|c| c.kind != ControlKind::Slider));
+    click_action(&mut app, Action::BrowserCategory(Category::Volume));
+    assert_eq!(app.picker_items(ToolPanel::Text).len(), 2);
+    browser_query(&mut app, "relief");
+    assert_eq!(
+        app.picker_items(ToolPanel::Text)[0].0,
+        Action::TextPreset(TextPreset::Relief)
+    );
+    press_key(&mut app, 70, true); // Return focus to the search field.
+    press_key(&mut app, 13, false);
+    press_key(&mut app, 27, false);
+    assert_eq!(
+        app.selected_tool_option(),
+        Action::TextPreset(TextPreset::Relief)
+    );
+    let (x, y) = (810., 650.);
+    left_down(&mut app, x, y);
+    left_up(&mut app, x, y);
+    let v = app
+        .canvas_editor()
+        .expect("first canvas click opens the editor");
+    app.event(Event::CanvasTextChanged {
+        session: v.session,
+        body: "Слой 3D".into(),
+    });
+    click_action(&mut app, Action::TextPreset(TextPreset::Block));
+    assert_eq!(app.canvas_editor().unwrap().session, v.session);
+    assert_eq!(app.current_text().body, "Слой 3D");
+    assert_eq!(app.current_text().effects.depth, 12);
+    click_action(&mut app, Action::CycleTextAlign);
+    assert_eq!(app.current_text().align, ParagraphAlign::Center);
+    click_action(&mut app, Action::ToolProperties);
+    click_action(&mut app, Action::ToolSection(2));
+    app.event(Event::Prompted {
+        id: 33,
+        value: Some("26".into()),
+    });
+    app.event(Event::Prompted {
+        id: 34,
+        value: Some("135".into()),
+    });
+    app.render();
+    let sample = &app.text_samples.get(&None).unwrap().0;
+    assert_eq!(sample.body, "Слой 3D");
+    assert_eq!(sample.effects.angle, 135);
+    assert!(sample.effects.depth > 0);
+    assert_eq!(app.draft_effects.as_ref().unwrap().0.effects.depth, 26);
+    click_action(
+        &mut app,
+        Action::ResetSlider(Slider::TextEffect(EffectParam::Depth)),
+    );
+    assert_eq!(app.current_text().effects.depth, 0);
+    click_action(&mut app, Action::ToolSection(1));
+    app.event(Event::Prompted {
+        id: 30,
+        value: Some("3".into()),
+    });
+    app.event(Event::Prompted {
+        id: 32,
+        value: Some("70".into()),
+    });
+    app.event(Event::Prompted {
+        id: 29,
+        value: Some("#AB3572".into()),
+    });
+    assert_eq!(app.current_text().effects.color, Color::from_hex(0xab3572));
+    app.text_renderer = anchor_raster; // the native renderer is covered independently
+    click_action(&mut app, Action::ApplyText);
+    assert_eq!(app.doc.undo_count(), 1);
+    assert_eq!(
+        app.doc
+            .active_layer()
+            .text
+            .as_ref()
+            .unwrap()
+            .effects
+            .outline,
+        3
+    );
+    click_action(&mut app, Action::ToolPanel(ToolPanel::Brush));
+    assert_eq!(
+        ToolSettings::from_brush(app.brush),
+        ToolSettings::from_brush(brush)
+    );
 }

@@ -376,16 +376,35 @@ pub struct ImportedImage {
 #[cfg(target_os = "windows")]
 mod windows;
 #[cfg(target_os = "windows")]
-pub use windows::{load_image, rasterize_text, run};
+pub(crate) use windows::render_text_tile;
+#[cfg(target_os = "windows")]
+pub use windows::{load_image, run};
 
-#[cfg(not(target_os = "windows"))]
-pub fn rasterize_text(
+#[cfg(target_os = "linux")]
+mod preview_glyphs;
+#[cfg(all(test, target_os = "linux"))]
+pub(crate) use preview_glyphs::preview_fonts_available;
+#[cfg(target_os = "linux")]
+pub(crate) use preview_glyphs::render_text_tile;
+
+#[cfg(not(any(target_os = "windows", target_os = "linux")))]
+pub(crate) fn render_text_tile(
     _: &TextLayer,
     _: u32,
     _: u32,
     _: crate::i18n::Language,
+    _: bool,
+) -> Result<crate::lettering::TextTile, String> {
+    Err("Не удалось отрисовать текст.".into())
+}
+
+pub fn rasterize_text(
+    text: &TextLayer,
+    width: u32,
+    height: u32,
+    language: crate::i18n::Language,
 ) -> Result<Vec<Color>, String> {
-    Err("Для вывода шрифтов требуется Windows.".into())
+    render_text_tile(text, width, height, language, true)?.into_canvas(width, height)
 }
 
 #[cfg(not(target_os = "windows"))]

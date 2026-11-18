@@ -113,7 +113,16 @@ fn settings_option(app: &mut PortfolioApp, query: &str, index: usize) {
 }
 
 fn tool_viewport_point(app: &mut PortfolioApp, language: Language) -> Option<(f32, f32)> {
-    let labels = ["Основные", "Отпечаток", "Штрих", "Заливка"].map(|text| language.translate(text));
+    let labels = [
+        "Основные",
+        "Отпечаток",
+        "Штрих",
+        "Заливка",
+        "Размер шрифта",
+        "Толщина обводки",
+        "Глубина 3D",
+    ]
+    .map(|text| language.translate(text));
     app.render()
         .texts
         .iter()
@@ -369,18 +378,27 @@ fn main() {
             );
             std::process::exit(2);
         }
-        let family = if has("--eraser-panel") {
+        let text_section = value("--text-section");
+        let text_style = value("--text-style");
+        let family = if has("--text-panel") || text_section.is_some() || text_style.is_some() {
+            Family::Text
+        } else if has("--eraser-panel") {
             Family::Eraser
         } else if has("--shape-panel") || shape_fill {
             Family::Shapes
         } else {
             Family::Brush
         };
-        if has("--detail") && family == Family::Shapes {
-            eprintln!("--detail requires a brush or eraser; use --shape-fill for shapes.");
+        if has("--detail") && matches!(family, Family::Shapes | Family::Text) {
+            eprintln!("--detail requires a brush or eraser.");
             std::process::exit(2);
         }
-        if has("--brush-panel")
+        if shape_fill && family != Family::Shapes {
+            eprintln!("--shape-fill requires the shapes panel.");
+            std::process::exit(2);
+        }
+        if family == Family::Text
+            || has("--brush-panel")
             || has("--eraser-panel")
             || has("--shape-panel")
             || brush.is_some()
@@ -391,9 +409,9 @@ fn main() {
             || has("--browser-search-open")
             || shape_fill
         {
-            if brush.is_some() && family == Family::Shapes {
+            if brush.is_some() && matches!(family, Family::Shapes | Family::Text) {
                 eprintln!(
-                    "--brush selects a brush or eraser preset; use --brush-search for shapes."
+                    "--brush selects a brush or eraser preset; --text-style selects a text style."
                 );
                 std::process::exit(2);
             }
@@ -422,6 +440,11 @@ fn main() {
                 chooser_query(&mut app, item.label());
                 key(&mut app, 13, false);
                 key(&mut app, 27, false); // Close search and restore the unfiltered categories.
+            }
+            if let Some(style) = text_style {
+                chooser_query(&mut app, style);
+                key(&mut app, 13, false);
+                key(&mut app, 27, false);
             }
             if has("--pin-panel") {
                 click(&mut app, initial_x + standard_width - 22., 162.);
@@ -471,9 +494,15 @@ fn main() {
                 key(&mut app, 70, true);
             }
         }
-        if has("--tool-settings") || has("--detail") || tool_scroll.is_some() || shape_fill {
+        if has("--tool-settings")
+            || text_section.is_some()
+            || has("--detail")
+            || tool_scroll.is_some()
+            || shape_fill
+        {
             // A tool-only preview may follow an appearance-only setup.
-            if !has("--pin-panel")
+            if family != Family::Text
+                && !has("--pin-panel")
                 && !has("--brush-panel")
                 && !has("--eraser-panel")
                 && !has("--shape-panel")
@@ -489,6 +518,21 @@ fn main() {
                 }
             }
             key(&mut app, 115, false);
+        }
+        if let Some(section) = text_section {
+            let label = match section.as_str() {
+                "type" => "Шрифт",
+                "effects" => "Эффекты",
+                "3d" => "3D",
+                _ => {
+                    eprintln!("--text-section expects type, effects or 3d");
+                    std::process::exit(2);
+                }
+            };
+            if !click_visible_text(&mut app, &language.unwrap_or_default().translate(label)) {
+                eprintln!("Text section is not visible");
+                std::process::exit(2);
+            }
         }
         if shape_fill || tool_scroll.is_some() || has("--detail") {
             let language = language.unwrap_or_default();
@@ -590,10 +634,6 @@ fn main() {
                 modifiers: Modifiers::default(),
             });
             // Keep the real slider drag active through the final render.
-        }
-        if has("--text-panel") {
-            key(&mut app, 84, false);
-            app.render();
         }
         // Finish layout previews with real gestures after the initial controls
         // have been addressed at their default positions. The groups move
