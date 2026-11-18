@@ -22,6 +22,7 @@ const MAX_FILE_BYTES: u64 = (MAX_LAYER_PIXELS * 4 + 1024 * 1024) as u64;
 mod document_text;
 pub use document_text::{ParagraphAlign, TextLayer};
 
+const STYLED_MAGIC: &[u8; 8] = b"PRTFOL03";
 const TEXT_MAGIC: &[u8; 8] = b"PRTFOL02";
 const MAGIC: &[u8; 8] = b"PRTFOL01";
 
@@ -2467,7 +2468,14 @@ impl Document {
         let mut bytes = Vec::with_capacity(
             self.layers.len() * self.width as usize * self.height as usize * 4 + 2048,
         );
-        bytes.extend_from_slice(if self.layers.iter().any(|l| l.text.is_some()) {
+        let extended = self
+            .layers
+            .iter()
+            .filter_map(|l| l.text.as_ref())
+            .any(|t| t.effects != Default::default());
+        bytes.extend_from_slice(if extended {
+            STYLED_MAGIC
+        } else if self.layers.iter().any(|l| l.text.is_some()) {
             TEXT_MAGIC
         } else {
             MAGIC
@@ -2487,7 +2495,7 @@ impl Document {
             ]);
             push_string(&mut bytes, &layer.name);
             if let Some(text) = &layer.text {
-                text.write(&mut bytes);
+                text.write(&mut bytes, extended);
             }
             for p in &layer.pixels {
                 bytes.extend_from_slice(&[p.r, p.g, p.b, p.a]);
@@ -2513,7 +2521,7 @@ impl Document {
         }
         let mut reader = Reader::new(&bytes[..checksum_at]);
         let version = reader.take(8)?;
-        if version != MAGIC && version != TEXT_MAGIC {
+        if version != MAGIC && version != TEXT_MAGIC && version != STYLED_MAGIC {
             return Err("Неизвестная версия файла Portfolio.".into());
         }
         let width = reader.u32()?;
@@ -2538,13 +2546,18 @@ impl Document {
             }
             max_id = max_id.max(id);
             let flags = reader.take(4)?;
-            if flags[0] > 1 || flags[1] > 1 || flags[3] > u8::from(version == TEXT_MAGIC) {
+            if flags[0] > 1 || flags[1] > 1 || flags[3] > u8::from(version != MAGIC) {
                 return Err("Повреждены параметры слоя.".into());
             }
             let (visible, locked, opacity) = (flags[0] != 0, flags[1] != 0, flags[2]);
             let name = reader.string(512)?;
             let text = if flags[3] == 1 {
-                Some(TextLayer::read(&mut reader, width, height)?)
+                Some(TextLayer::read(
+                    &mut reader,
+                    width,
+                    height,
+                    version == STYLED_MAGIC,
+                )?)
             } else {
                 None
             };

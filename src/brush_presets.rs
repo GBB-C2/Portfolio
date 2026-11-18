@@ -191,7 +191,7 @@ impl PortfolioApp {
     }
 
     pub(super) fn picker_items(&self, family: ToolPanel) -> Vec<(Action, ItemId)> {
-        if family == ToolPanel::Shapes {
+        if matches!(family, ToolPanel::Shapes | ToolPanel::Text) {
             return self
                 .browser
                 .filtered_ids(family, self.language)

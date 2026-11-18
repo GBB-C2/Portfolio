@@ -6,5 +6,6 @@ pub mod platform;
 pub mod render;
 
 pub mod i18n;
+pub mod lettering;
 pub mod motion;
 pub mod tool_browser;

@@ -398,90 +398,99 @@ unsafe fn style_font(
     Ok((font, face))
 }
 
-pub(super) unsafe fn rasterize(
+struct GlyphFonts {
+    fonts: Fonts,
+    _registered: Vec<FontResource>,
+}
+thread_local! {
+    static GLYPH_FONTS: std::cell::RefCell<GlyphFonts> = {
+        let mut fonts = Fonts::default();
+        let registered = unsafe { register_bundled_fonts(&mut fonts) };
+        std::cell::RefCell::new(GlyphFonts { fonts, _registered: registered })
+    };
+}
+
+pub(super) unsafe fn raster_tile(
     text: &TextLayer,
     width: u32,
     height: u32,
     language: Language,
-) -> Result<Vec<Color>, String> {
-    let surface = Surface::new(width, height)?;
-    let count = width as usize * height as usize;
-    std::ptr::write_bytes(surface.bits, 0, count);
-    let mut fonts = Fonts::default();
-    let _bundled = register_bundled_fonts(&mut fonts);
-    let (font, _) = style_font(surface.dc, &mut fonts, text, text.size as i32, language)?;
-    if font.is_null() {
-        return Err("Не удалось отрисовать текст.".into());
-    }
-    let previous = SelectObject(surface.dc, font);
-    if previous.is_null() || previous == -1isize as Handle {
-        DeleteObject(font);
-        return Err("Не удалось отрисовать текст.".into());
-    }
-    SetBkMode(surface.dc, 1);
-    SetTextColor(surface.dc, 0x00ff_ffff);
-    let flags = 0x0800 | 0x0020 | 0x0040; // DT_NOPREFIX | DT_SINGLELINE | DT_EXPANDTABS
-    let mut top = text.y as i32;
-    for line in text.body.split('\n') {
-        if top >= height as i32 {
-            break;
+    face: bool,
+) -> Result<crate::lettering::TextTile, String> {
+    let metrics = Surface::new(1, 1)?;
+    let (font, _) = GLYPH_FONTS.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        cache.fonts.begin_frame();
+        style_font(
+            metrics.dc,
+            &mut cache.fonts,
+            text,
+            text.size as i32,
+            language,
+        )
+    })?;
+    // A font cannot be deleted while it is selected into a DC.
+    struct Font(Handle);
+    impl Drop for Font {
+        fn drop(&mut self) {
+            unsafe {
+                DeleteObject(self.0);
+            }
         }
-        let units: Vec<u16> = if line.is_empty() { " " } else { line }
-            .encode_utf16()
-            .collect();
+    }
+    let font = Font(font);
+    let flags = 0x0800 | 0x0020 | 0x0040; // DT_NOPREFIX | DT_SINGLELINE | DT_EXPANDTABS
+    let prior = SelectObject(metrics.dc, font.0);
+    if prior.is_null() || prior == -1isize as Handle {
+        return Err("Не удалось отрисовать текст.".into());
+    }
+    let layout = crate::lettering::TextLayout::measure(text, width, height, |line| {
+        let units: Vec<_> = line.encode_utf16().collect();
         let mut rect = Rect::default();
         DrawTextW(
-            surface.dc,
+            metrics.dc,
             units.as_ptr(),
             units.len() as i32,
             &mut rect,
             flags | 0x0400,
         );
-        let advance = rect.right.max(1);
-        let line_height = rect.bottom.max(1);
-        let left = text.x as i32
-            - match text.align {
-                ParagraphAlign::Left => 0,
-                ParagraphAlign::Center => advance / 2,
-                ParagraphAlign::Right => advance,
-            };
-        rect = Rect {
-            left,
-            top,
-            right: left + advance + text.size as i32,
-            bottom: top + line_height,
+        (rect.right.max(1), rect.bottom.max(1))
+    });
+    SelectObject(metrics.dc, prior);
+    let layout =
+        layout.ok_or("Текст выходит за границы холста. Измените координаты или размер.")?;
+    let surface = Surface::new(layout.w as u32, layout.h as u32)?;
+    let count = layout.w * layout.h;
+    std::ptr::write_bytes(surface.bits, 0, count);
+    let prior = SelectObject(surface.dc, font.0);
+    if prior.is_null() || prior == -1isize as Handle {
+        return Err("Не удалось отрисовать текст.".into());
+    }
+    SetBkMode(surface.dc, 1);
+    SetTextColor(surface.dc, 0x00ff_ffff);
+    for &(line, x, y) in &layout.lines {
+        let units: Vec<_> = line.encode_utf16().collect();
+        let mut rect = Rect {
+            left: x - layout.x,
+            top: y - layout.y,
+            right: layout.w as i32,
+            bottom: layout.h as i32,
         };
         DrawTextW(
             surface.dc,
             units.as_ptr(),
             units.len() as i32,
             &mut rect,
-            flags,
-        );
-        top += line_height;
+            flags | 0x0100,
+        ); // DT_NOCLIP; DIB bounds still apply
     }
     GdiFlush();
-    SelectObject(surface.dc, previous);
-    DeleteObject(font);
-    let bits = std::slice::from_raw_parts(surface.bits, count);
-    let pixels: Vec<_> = bits
+    SelectObject(surface.dc, prior);
+    let mask: Vec<u8> = std::slice::from_raw_parts(surface.bits, count)
         .iter()
-        .map(|v| {
-            let alpha = ((v & 255) * u32::from(text.color.a) + 127) / 255;
-            if alpha == 0 {
-                Color::TRANSPARENT
-            } else {
-                Color {
-                    a: alpha as u8,
-                    ..text.color
-                }
-            }
-        })
+        .map(|p| *p as u8)
         .collect();
-    if !pixels.iter().any(|p| p.a != 0) {
-        return Err("Текст выходит за границы холста. Измените координаты или размер.".into());
-    }
-    Ok(pixels)
+    Ok(layout.paint(text, &mask, face))
 }
 
 #[cfg(test)]
@@ -513,6 +522,7 @@ mod tests {
             let mut view = CanvasEditView {
                 session: 7,
                 text: TextLayer {
+                    effects: Default::default(),
                     body: String::new(),
                     font: UiFont::SegoeUi.key().into(),
                     size: 24,
@@ -554,6 +564,7 @@ mod tests {
     #[test]
     fn native_glyphs_preserve_multiline_alignment_color_and_alpha() {
         let mut text = TextLayer {
+            effects: Default::default(),
             body: "Тип &\nAa".into(),
             font: UiFont::SegoeUi.key().into(),
             size: 24,
@@ -564,8 +575,7 @@ mod tests {
             x: 75,
             y: 4,
         };
-        let render =
-            |text: &TextLayer| unsafe { rasterize(text, 190, 90, Language::Russian).unwrap() };
+        let render = |text: &TextLayer| rasterize_text(text, 190, 90, Language::Russian).unwrap();
         let left = render(&text);
         assert!(left
             .iter()

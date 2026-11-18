@@ -1,5 +1,6 @@
 //! Editable type stores its layout alongside a raster for portable compositing and export.
 use super::*;
+use crate::lettering::TextEffects;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum ParagraphAlign {
@@ -20,6 +21,24 @@ pub struct TextLayer {
     pub align: ParagraphAlign,
     pub x: u32,
     pub y: u32,
+    pub effects: TextEffects,
+}
+
+impl Default for TextLayer {
+    fn default() -> Self {
+        Self {
+            body: String::new(),
+            font: "segoe_ui".into(),
+            size: 48,
+            color: Color::BLACK,
+            bold: false,
+            italic: false,
+            align: ParagraphAlign::Left,
+            x: 0,
+            y: 0,
+            effects: TextEffects::default(),
+        }
+    }
 }
 
 impl TextLayer {
@@ -33,7 +52,8 @@ impl TextLayer {
         {
             return Err("Введите текст длиной до 4096 знаков.".into());
         }
-        if !(4..=512).contains(&self.size)
+        if !self.effects.valid()
+            || !(4..=512).contains(&self.size)
             || self.x >= width
             || self.y >= height
             || self.font.is_empty()
@@ -45,7 +65,7 @@ impl TextLayer {
         Ok(())
     }
 
-    pub(super) fn write(&self, bytes: &mut Vec<u8>) {
+    pub(super) fn write(&self, bytes: &mut Vec<u8>, extended: bool) {
         push_string(bytes, &self.body);
         push_string(bytes, &self.font);
         for v in [self.x, self.y, self.size] {
@@ -60,9 +80,20 @@ impl TextLayer {
             self.italic as u8,
             self.align as u8,
         ]);
+        if extended {
+            let e = self.effects;
+            bytes.extend_from_slice(&[e.outline, e.shadow, e.shadow_opacity, e.depth]);
+            bytes.extend_from_slice(&e.angle.to_le_bytes());
+            bytes.extend_from_slice(&[e.color.r, e.color.g, e.color.b, e.color.a]);
+        }
     }
 
-    pub(super) fn read(reader: &mut Reader, width: u32, height: u32) -> Result<Self, String> {
+    pub(super) fn read(
+        reader: &mut Reader,
+        width: u32,
+        height: u32,
+        extended: bool,
+    ) -> Result<Self, String> {
         let body = reader.utf8(16384)?;
         let font = reader.string(128)?;
         let (x, y, size) = (reader.u32()?, reader.u32()?, reader.u32()?);
@@ -83,6 +114,19 @@ impl TextLayer {
             y,
             size,
             align,
+            effects: if extended {
+                let v = reader.take(10)?;
+                TextEffects {
+                    outline: v[0],
+                    shadow: v[1],
+                    shadow_opacity: v[2],
+                    depth: v[3],
+                    angle: u16::from_le_bytes([v[4], v[5]]),
+                    color: Color::rgba(v[6], v[7], v[8], v[9]),
+                }
+            } else {
+                TextEffects::default()
+            },
             color: Color::rgba(fields[0], fields[1], fields[2], fields[3]),
             bold: fields[4] != 0,
             italic: fields[5] != 0,

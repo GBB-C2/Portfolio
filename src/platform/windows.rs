@@ -683,13 +683,14 @@ impl Drop for Fonts {
     }
 }
 
-pub fn rasterize_text(
+pub(crate) fn render_text_tile(
     text: &TextLayer,
     width: u32,
     height: u32,
     language: Language,
-) -> Result<Vec<Color>, String> {
-    unsafe { text_editor::rasterize(text, width, height, language) }
+    face: bool,
+) -> Result<crate::lettering::TextTile, String> {
+    unsafe { text_editor::raster_tile(text, width, height, language, face) }
 }
 
 struct WindowState {

@@ -11,11 +11,7 @@ pub(super) struct ToolPropertiesUi {
 
 impl PortfolioApp {
     fn tool_settings_family_index(&self) -> usize {
-        if self.tool == Tool::Text {
-            4
-        } else {
-            ToolPanel::for_tool(self.tool).map_or(3, ToolPanel::index)
-        }
+        ToolPanel::for_tool(self.tool).map_or(4, ToolPanel::index)
     }
 
     fn tool_settings_brushes(&self) -> bool {
@@ -23,9 +19,9 @@ impl PortfolioApp {
     }
 
     fn tool_settings_section_count(&self) -> u8 {
-        if self.tool_settings_brushes() {
+        if self.tool_settings_brushes() || self.tool == Tool::Text {
             3
-        } else if matches!(self.tool, Tool::Fill | Tool::Text) {
+        } else if self.tool == Tool::Fill {
             1
         } else {
             2
@@ -84,7 +80,11 @@ impl PortfolioApp {
 
     fn tool_settings_content_height(&self) -> f32 {
         if self.tool == Tool::Text {
-            return 253.;
+            return if self.tool_settings_section() == 0 {
+                253.
+            } else {
+                self.text_effect_params().len() as f32 * 54. + 36.
+            };
         }
         28. + 54. * self.section_actions(self.tool_settings_section()).len() as f32
     }
@@ -97,7 +97,9 @@ impl PortfolioApp {
             (self.w() - 336.).clamp(360., 448.)
         }
         .min((self.w() - 32.).max(0.));
-        let preferred_height: f32 = if self.tool_settings_brushes() || self.tool == Tool::Text {
+        let preferred_height: f32 = if self.tool == Tool::Text {
+            420.
+        } else if self.tool_settings_brushes() {
             384.
         } else if self.tool == Tool::Fill {
             192.
@@ -160,7 +162,12 @@ impl PortfolioApp {
     pub(super) fn tool_settings_viewport(&self) -> Rect {
         let panel = self.tool_settings_rect();
         if self.tool == Tool::Text {
-            return Rect::new(panel.x + 16., panel.y + 54., panel.w - 32., panel.h - 106.);
+            return Rect::new(
+                panel.x + 16.,
+                panel.y + 93.,
+                panel.w - 32.,
+                (panel.h - 145.).max(0.),
+            );
         }
         let (header, footer) = if self.tool_settings_brushes() {
             (78., 64.)
@@ -308,13 +315,35 @@ impl PortfolioApp {
             _ => {}
         }
         if self.tool == Tool::Text {
-            if let Some(index) = Self::text_row(action) {
+            let item = match action {
+                Action::TextEffect(p) => {
+                    let section = if matches!(p, EffectParam::Depth | EffectParam::Direction) {
+                        2
+                    } else {
+                        1
+                    };
+                    self.tool_section(section);
+                    self.text_effect_params()
+                        .iter()
+                        .position(|&v| v == p)
+                        .map(|i| (i as f32 * 54., 46.))
+                }
+                Action::EffectColor => {
+                    if self.tool_settings_section() == 0 {
+                        self.tool_section(1);
+                    }
+                    Some((self.text_effect_params().len() as f32 * 54., 30.))
+                }
+                _ => Self::text_row(action).map(|i| {
+                    self.tool_section(0);
+                    (Self::TEXT_ROWS[i], if i == 1 { 46. } else { 30. })
+                }),
+            };
+            if let Some((y, h)) = item {
                 self.prepare_tool_settings_layout();
-                let y = Self::TEXT_ROWS[index];
                 let family = self.tool_settings_family_index();
-                if self.tool_properties_ui.scrolls[family][0]
-                    .ensure_visible(y, y + if index == 1 { 46. } else { 30. })
-                {
+                let section = self.tool_settings_section() as usize;
+                if self.tool_properties_ui.scrolls[family][section].ensure_visible(y, y + h) {
                     self.invalidate_tool_settings_geometry();
                 }
             }
@@ -455,6 +484,7 @@ impl PortfolioApp {
 
         let body = self.tool_settings_viewport();
         if self.tool == Tool::Text {
+            self.draw_text_header(p, panel);
             self.draw_text_settings(p, panel, body);
             self.draw_tool_scrollbar(p);
             self.hit_clip = None;

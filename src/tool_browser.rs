@@ -3,22 +3,25 @@
 
 use crate::document::{BrushKind, ShapeKind};
 use crate::i18n::Language;
+use crate::lettering::TextPreset;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Family {
     Brush,
     Eraser,
     Shapes,
+    Text,
 }
 
 impl Family {
-    pub const ALL: [Self; 3] = [Self::Brush, Self::Eraser, Self::Shapes];
+    pub const ALL: [Self; 4] = [Self::Brush, Self::Eraser, Self::Shapes, Self::Text];
 
     pub const fn index(self) -> usize {
         match self {
             Self::Brush => 0,
             Self::Eraser => 1,
             Self::Shapes => 2,
+            Self::Text => 3,
         }
     }
 }
@@ -28,6 +31,7 @@ pub enum ItemId {
     Brush(BrushKind),
     Eraser(BrushKind),
     Shape(ShapeKind),
+    Text(TextPreset),
 }
 
 impl ItemId {
@@ -53,6 +57,7 @@ impl ItemId {
             Self::Eraser(BrushKind::Calligraphy) => "Скошенный",
             Self::Eraser(BrushKind::Spray) => "Крапчатый",
             Self::Eraser(BrushKind::Flat) => "Широкий",
+            Self::Text(style) => style.label(),
             Self::Shape(ShapeKind::Line) => "Линия",
             Self::Shape(ShapeKind::Rectangle) => "Прямоугольник",
             Self::Shape(ShapeKind::Ellipse) => "Эллипс",
@@ -83,6 +88,7 @@ impl ItemId {
             }
             Self::Eraser(BrushKind::Spray) => "speckled speckle dots erase eraser rubber",
             Self::Eraser(BrushKind::Flat) => "wide broad erase eraser rubber",
+            Self::Text(style) => style.aliases(),
             Self::Shape(ShapeKind::Line) => "line straight segment",
             Self::Shape(ShapeKind::Rectangle) => "rectangle rect square box",
             Self::Shape(ShapeKind::Ellipse) => "ellipse oval circle",
@@ -105,6 +111,11 @@ pub enum Category {
     Line,
     Angular,
     Curves,
+    Reading,
+    Titles,
+    Handwriting,
+    Decoration,
+    Volume,
 }
 
 impl Category {
@@ -120,6 +131,14 @@ impl Category {
                 Self::Spray,
                 Self::Calligraphy,
                 Self::Flat,
+            ],
+            Family::Text => &[
+                Self::All,
+                Self::Reading,
+                Self::Titles,
+                Self::Handwriting,
+                Self::Decoration,
+                Self::Volume,
             ],
             Family::Shapes => &[Self::All, Self::Line, Self::Angular, Self::Curves],
         }
@@ -139,6 +158,11 @@ impl Category {
             Self::Line => "Линии",
             Self::Angular => "Углы",
             Self::Curves => "Кривые",
+            Self::Reading => "Для чтения",
+            Self::Titles => "Заголовки",
+            Self::Handwriting => "Рукописные",
+            Self::Decoration => "Эффекты",
+            Self::Volume => "Объём",
         }
     }
 
@@ -156,6 +180,11 @@ impl Category {
             Self::Line => "line",
             Self::Angular => "rect",
             Self::Curves => "ellipse",
+            Self::Reading => "text",
+            Self::Titles => "bold",
+            Self::Handwriting => "calligraphy",
+            Self::Decoration => "outline",
+            Self::Volume => "cube",
         }
     }
 
@@ -173,6 +202,11 @@ impl Category {
             Self::Line => "line",
             Self::Angular => "angular",
             Self::Curves => "curves",
+            Self::Reading => "reading",
+            Self::Titles => "titles",
+            Self::Handwriting => "handwriting",
+            Self::Decoration => "effects",
+            Self::Volume => "3d",
         }
     }
 
@@ -181,6 +215,7 @@ impl Category {
         Self::for_family(Family::Brush)
             .iter()
             .chain(Self::for_family(Family::Shapes))
+            .chain(Self::for_family(Family::Text))
             .copied()
             .find(|category| category.key() == key)
     }
@@ -196,6 +231,17 @@ impl Category {
         };
         match self {
             Self::All => true,
+            Self::Reading => matches!(item, ItemId::Text(TextPreset::Body | TextPreset::Caption)),
+            Self::Titles => matches!(item, ItemId::Text(TextPreset::Heading | TextPreset::Poster)),
+            Self::Handwriting => matches!(
+                item,
+                ItemId::Text(TextPreset::Script | TextPreset::Signature)
+            ),
+            Self::Decoration => {
+                matches!(item, ItemId::Text(TextPreset::Outline | TextPreset::Shadow))
+            }
+            Self::Volume => matches!(item, ItemId::Text(TextPreset::Block | TextPreset::Relief)),
+
             Self::Ink => matches!(item, ItemId::Brush(B::Ink | B::Marker | B::Calligraphy)),
             Self::Sketch => matches!(item, ItemId::Brush(B::Pencil | B::Charcoal | B::Chalk)),
             Self::Painting => matches!(item, ItemId::Brush(B::Soft | B::Marker | B::Flat)),
@@ -475,7 +521,7 @@ pub struct View {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Browser {
-    views: [View; 3],
+    views: [View; 4],
 }
 
 impl Browser {
@@ -520,6 +566,7 @@ impl Browser {
 
     pub fn filtered_ids(&self, family: Family, language: Language) -> Vec<ItemId> {
         let ids: Vec<_> = match family {
+            Family::Text => TextPreset::ALL.into_iter().map(ItemId::Text).collect(),
             Family::Brush => BrushKind::ALL.into_iter().map(ItemId::Brush).collect(),
             Family::Eraser => BrushKind::ALL.into_iter().map(ItemId::Eraser).collect(),
             Family::Shapes => [ShapeKind::Line, ShapeKind::Rectangle, ShapeKind::Ellipse]
