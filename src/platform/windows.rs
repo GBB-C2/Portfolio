@@ -4,6 +4,9 @@
 //! until its message loop has ended. No mutable application borrow is retained
 //! across a modal OS call, because those calls can dispatch window messages.
 
+#[path = "text_editor.rs"]
+mod text_editor;
+
 use super::frame_cache::{FontChoiceCache, FontContext, FramePacer};
 use super::*;
 use crate::i18n::Language;
@@ -1062,6 +1065,30 @@ unsafe fn apply_effect(ptr: *mut WindowState, effect: Effect) {
                 }
             }
         }
+        Effect::EditTextLayer {
+            document,
+            target,
+            width,
+            height,
+            text,
+        } => match text_editor::open(hwnd, text, width, height, language) {
+            Ok(Some((text, pixels))) => dispatch(
+                ptr,
+                Event::TextLayerEdited {
+                    document,
+                    target,
+                    text,
+                    pixels,
+                },
+            ),
+            Ok(None) => {}
+            Err(error) => show_message(
+                hwnd,
+                &language.translate("Текст на холсте"),
+                &language.translate(&error),
+                true,
+            ),
+        },
         Effect::CopyText(text) => {
             if let Err(error) = copy_text(hwnd, &text) {
                 show_message(

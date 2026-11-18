@@ -1,5 +1,6 @@
 //! Small operating-system boundary. Document and UI state never own Win32 handles.
 
+use crate::document::{Color, TextLayer};
 use std::path::{Path, PathBuf};
 
 #[cfg(any(target_os = "windows", test))]
@@ -68,6 +69,12 @@ pub enum Event {
     },
     Text(String),
     Paste(String),
+    TextLayerEdited {
+        document: u64,
+        target: Option<u64>,
+        text: TextLayer,
+        pixels: Vec<Color>,
+    },
     FocusLost,
     CaptureLost,
     /// OS accessibility preference; true disables nonessential transitions.
@@ -115,6 +122,13 @@ pub enum Effect {
         title: String,
         message: String,
         error: bool,
+    },
+    EditTextLayer {
+        document: u64,
+        target: Option<u64>,
+        width: u32,
+        height: u32,
+        text: TextLayer,
     },
     CopyText(String),
     PasteText,

@@ -1338,13 +1338,14 @@ fn tool_properties_sections_reveal_only_their_parameters_and_preserve_independen
                 && panel.contains(c.hit.x + c.hit.w * 0.5, c.hit.y + c.hit.h * 0.5)
         })
     }
-    const BASIC: [Action; 4] = [
-        Action::Size,
-        Action::Opacity,
-        Action::Hardness,
-        Action::Flow,
+    const BASIC: [Action; 3] = [Action::Size, Action::Opacity, Action::Hardness];
+    const STAMP: [Action; 5] = [
+        Action::Spacing,
+        Action::Angle,
+        Action::Scatter,
+        Action::Roundness,
+        Action::Grain,
     ];
-    const STAMP: [Action; 3] = [Action::Spacing, Action::Angle, Action::Scatter];
     for (width, height, font_size, dark) in [(884, 581, 17, true), (1440, 940, 11, false)] {
         for tool in [Tool::Brush, Tool::Eraser] {
             let mut app = floating_panel_fixture();
@@ -1435,7 +1436,7 @@ fn tool_properties_sections_reveal_only_their_parameters_and_preserve_independen
             click_action(&mut app, Action::ToolSection(1));
             app.render();
             assert_eq!(app.tool_settings_section(), 1);
-            assert!(BASIC.iter().all(|&a| !visible(&app, a)));
+            assert!(!visible(&app, Action::Size) && !visible(&app, Action::Opacity));
             for action in STAMP {
                 assert!(app.tool_settings_reveal_action(action));
                 app.render();
@@ -1507,17 +1508,18 @@ fn tool_properties_sections_reveal_only_their_parameters_and_preserve_independen
             click_action(&mut app, Action::ToolSection(2));
             app.render();
             assert_eq!(app.tool_settings_section(), 2);
-            assert!(BASIC.iter().chain(STAMP.iter()).all(|&a| !visible(&app, a)));
+            assert!(visible(&app, Action::Opacity));
+            assert!(!visible(&app, Action::Roundness));
             assert!(
                 app.brush_preview.is_some(),
-                "the sample section renders the current tool"
+                "the fixed preview renders the current tool"
             );
             press_key(&mut app, 115, false);
             press_key(&mut app, 115, false);
             app.render();
             assert_eq!(app.tool_settings_section(), 0);
             assert_eq!(focused_action(&app), Some(Action::Size));
-            for action in [Action::Opacity, Action::Hardness, Action::Flow] {
+            for action in [Action::Opacity, Action::Hardness] {
                 press_key(&mut app, 9, false);
                 app.render();
                 assert_eq!(focused_action(&app), Some(action));
@@ -1525,7 +1527,7 @@ fn tool_properties_sections_reveal_only_their_parameters_and_preserve_independen
                 assert!(panel.contains(hit.x + hit.w * 0.5, hit.y + hit.h * 0.5));
                 assert_eq!(app.tool_settings_section(), 0);
             }
-            for _ in 0..4 {
+            for _ in 0..3 {
                 app.event(Event::Key {
                     code: 9,
                     pressed: true,
@@ -1539,14 +1541,14 @@ fn tool_properties_sections_reveal_only_their_parameters_and_preserve_independen
             }
             assert_eq!(focused_action(&app), Some(Action::ToolSection(2)));
             assert_eq!(app.tool_settings_section(), 0);
-            press_key(&mut app, 35, false); // End selects Sample.
+            press_key(&mut app, 35, false); // End selects Stroke.
             assert_eq!(app.tool_settings_section(), 2);
             press_key(&mut app, 36, false); // Home and Right can arrive before a redraw.
             press_key(&mut app, 39, false);
             app.render();
             assert_eq!(focused_action(&app), Some(Action::ToolSection(1)));
             assert_eq!(app.tool_settings_section(), 1);
-            assert!(BASIC.iter().all(|&a| !visible(&app, a)));
+            assert!(!visible(&app, Action::Size) && !visible(&app, Action::Opacity));
             assert_eq!(ToolSettings::from_brush(app.brush), settings);
             assert_eq!((app.view_x, app.view_y, app.zoom), view);
             assert_eq!(app.doc.to_bytes().unwrap(), before);
@@ -2876,6 +2878,8 @@ fn modeless_tool_properties_share_input_with_chooser_quick_controls_inspector_an
             }
             assert_eq!(focused_action(&app), Some(Action::CloseToolProperties));
             for action in [
+                Action::RenameBrush,
+                Action::AddBrush,
                 Action::ToolSection(0),
                 Action::ToolSection(1),
                 Action::ToolSection(2),
@@ -3711,7 +3715,7 @@ fn extended_brush_scrolling_and_stamp_settings_keep_separate_paint_and_eraser_pr
 fn eraser_has_its_own_catalogue_presets_and_true_erasing_samples() {
     let mut app = floating_panel_fixture();
     let before = app.doc.to_bytes().unwrap();
-    let paint_presets = app.paint_presets;
+    let paint_presets = app.presets.entries[0].clone();
     let paint_settings = ToolSettings::from_brush(app.brush);
     let eraser_labels = [
         "Твёрдый",
@@ -3759,12 +3763,12 @@ fn eraser_has_its_own_catalogue_presets_and_true_erasing_samples() {
                 }
             }
             for index in 0..10 {
-                let key = index
-                    + if dark { 0 } else { 10 }
-                    + if family == ToolPanel::Eraser { 20 } else { 0 };
-                let sample = app.brush_samples[key]
-                    .as_ref()
-                    .expect("every scrolled catalogue sample was drawn");
+                let key = (family == ToolPanel::Eraser, index, dark);
+                let sample = &app
+                    .brush_samples
+                    .get(&key)
+                    .expect("every scrolled catalogue sample was drawn")
+                    .1;
                 assert_eq!(sample.len(), 112 * 40);
                 if family == ToolPanel::Eraser {
                     assert_eq!(
@@ -3791,7 +3795,7 @@ fn eraser_has_its_own_catalogue_presets_and_true_erasing_samples() {
     let erase_settings = ToolSettings::from_brush(app.brush);
     click_action(&mut app, Action::CloseToolProperties);
     click_action(&mut app, Action::ToolPanel(ToolPanel::Brush));
-    assert_eq!(app.paint_presets, paint_presets);
+    assert_eq!(app.presets.entries[0], paint_presets);
     assert_eq!(ToolSettings::from_brush(app.brush), paint_settings);
     click_action(&mut app, Action::ToolPanel(ToolPanel::Eraser));
     assert_eq!(ToolSettings::from_brush(app.brush), erase_settings);
@@ -3801,12 +3805,14 @@ fn eraser_has_its_own_catalogue_presets_and_true_erasing_samples() {
         ToolSettings::from_brush(app.brush),
         ToolSettings::preset(BrushKind::Pencil, true)
     );
-    assert_eq!(app.paint_presets, paint_presets);
+    assert_eq!(app.presets.entries[0], paint_presets);
 
     // Equal settings and theme still need distinct preview cache entries for paint and erase.
     let common = ToolSettings {
         kind: BrushKind::Ink,
         size: 14.,
+        roundness: 1.,
+        grain: 0.,
         opacity: 0.45,
         hardness: 0.8,
         flow: 0.7,
@@ -3828,7 +3834,7 @@ fn eraser_has_its_own_catalogue_presets_and_true_erasing_samples() {
     app.render();
     let erased = app.brush_preview.as_ref().unwrap();
     assert_eq!(erased.0, common);
-    assert_eq!(erased.1, painted.1);
+    assert_eq!(painted.1, rgb(app.brush.color));
     assert!(erased.2);
     assert_eq!(erased.3[0].a, 255);
     assert!(erased.3.iter().any(|p| p.a < 255));
@@ -5215,7 +5221,7 @@ fn size_previews_are_only_outlines_for_brush_eraser_and_all_shapes() {
     app.render();
     let properties = app.tool_settings_rect();
     click_point(&mut app, properties.x + 3., properties.y + 6.);
-    app.brush.size = 256.5; // The half-track gesture leaves the underlying parameters unchanged.
+    app.brush.size = 257.; // The half-track gesture rounds to 257, including the live header sample.
     let baseline = app.render();
     begin_quick_drag(&mut app, Action::Size, 0.5);
     let area = app.quick_preview_rect(Action::Size);
@@ -5230,4 +5236,144 @@ fn size_previews_are_only_outlines_for_brush_eraser_and_all_shapes() {
     assert!(app.tool_settings_visible());
     assert_eq!(app.doc.to_bytes().unwrap(), before);
     assert_eq!((app.doc.undo_count(), app.doc.redo_count()), (0, 0));
+}
+
+#[test]
+fn preset_header_renames_copies_and_restores_independent_brushes() {
+    let directory = FixtureDirectory::new();
+    let mut app = floating_panel_fixture();
+    app.prefs = Some(directory.file("settings.txt"));
+    click_action(&mut app, Action::ToolPanel(ToolPanel::Brush));
+    press_key(&mut app, 115, false);
+    app.render();
+    let initial = ToolSettings::from_brush(app.brush);
+    let doc = app.doc.to_bytes().unwrap();
+    for s in 0..3 {
+        click_action(&mut app, Action::ToolSection(s));
+        let frame = app.render();
+        let caption = frame.texts.iter().find(|r| r.text == "Образец").unwrap();
+        assert!(caption.y < app.tool_settings_viewport().y);
+        assert!(!app
+            .controls
+            .iter()
+            .any(|c| matches!(c.action, Action::ToolSection(_)) && c.label == "Образец"));
+    }
+    click_action(&mut app, Action::RenameBrush);
+    app.event(Event::Text("Тушь № 1".into()));
+    press_key(&mut app, 84, false);
+    assert_eq!(app.tool, Tool::Brush);
+    press_key(&mut app, 13, false);
+    assert_eq!(app.preset_name(0, 0), "Тушь № 1");
+    click_action(&mut app, Action::RenameBrush);
+    app.event(Event::Text("Черновик".into()));
+    press_key(&mut app, 27, false);
+    assert_eq!(app.preset_name(0, 0), "Тушь № 1");
+    click_action(&mut app, Action::AddBrush);
+    app.event(Event::Paste("Перо 雪".into()));
+    press_key(&mut app, 13, false);
+    assert_eq!(app.presets.selected[0], 10);
+    assert_eq!(ToolSettings::from_brush(app.brush), initial);
+    set_tool_number(&mut app, Action::Roundness, "30");
+    set_tool_number(&mut app, Action::Grain, "80");
+    let copied = ToolSettings::from_brush(app.brush);
+    assert_ne!(
+        PortfolioApp::tool_sample(initial, 0x334455, false),
+        PortfolioApp::tool_sample(copied, 0x334455, false)
+    );
+    assert_eq!(app.presets.entries[0][0].settings, initial);
+    browser_query(&mut app, "雪");
+    assert_eq!(app.picker_items(ToolPanel::Brush).len(), 1);
+    click_action(&mut app, Action::Brush(10));
+    assert_eq!(ToolSettings::from_brush(app.brush), copied);
+    let saved =
+        Presets::decode(&fs::read_to_string(directory.file("brushes.txt")).unwrap()).unwrap();
+    assert_eq!(saved.entries, app.presets.entries);
+    assert_eq!(saved.selected, app.presets.selected);
+    assert_eq!(saved.entries[1].len(), 10);
+    assert_eq!(app.doc.to_bytes().unwrap(), doc);
+}
+
+#[test]
+fn canvas_text_creation_and_reediting_use_document_coordinates_and_one_undo_step() {
+    fn request(effects: Vec<Effect>) -> (u64, Option<u64>, TextLayer) {
+        effects
+            .into_iter()
+            .find_map(|e| match e {
+                Effect::EditTextLayer {
+                    document,
+                    target,
+                    text,
+                    ..
+                } => Some((document, target, text)),
+                _ => None,
+            })
+            .expect("editable text dialog")
+    }
+    let mut app = floating_panel_fixture();
+    click_action(&mut app, Action::Tool(Tool::Text));
+    let (x, y) = (810., 650.);
+    let (dx, dy) = app.doc_point(x, y);
+    let click = |app: &mut PortfolioApp| {
+        app.event(Event::MouseDown {
+            x,
+            y,
+            button: MouseButton::Left,
+            modifiers: Modifiers::default(),
+        })
+    };
+    let (document, target, mut text) = request(click(&mut app));
+    assert_eq!(target, None);
+    assert_eq!((text.x, text.y), (dx as u32, dy as u32));
+    assert_eq!(app.doc.undo_count(), 0); // Dismissing the dialog produces no edit.
+    text.body = "Абзац & 字\nСтрока 2".into();
+    text.bold = true;
+    text.align = ParagraphAlign::Center;
+    let mut pixels = vec![Color::TRANSPARENT; (app.doc.width * app.doc.height) as usize];
+    let index = (text.y * app.doc.width + text.x) as usize;
+    pixels[index] = text.color;
+    app.event(Event::TextLayerEdited {
+        document,
+        target,
+        text: text.clone(),
+        pixels: pixels.clone(),
+    });
+    let id = app.doc.active_layer().id;
+    assert_eq!(app.doc.undo_count(), 1);
+    assert_eq!(app.doc.active_layer().text.as_ref(), Some(&text));
+    assert!(!app.doc.can_paint());
+    let (_, target_from_layers, _) = request(click_action(&mut app, Action::EditTextLayer(id)));
+    assert_eq!(target_from_layers, Some(id));
+    let saved = app.doc.snapshot_for_io().unwrap().to_bytes().unwrap();
+    assert_eq!(&saved[..8], b"PRTFOL02");
+    app.doc = Document::from_bytes(&saved).unwrap();
+    assert_eq!(app.doc.active_layer().text.as_ref(), Some(&text));
+    let (_, target, mut edited) = request(click(&mut app));
+    assert_eq!(target, Some(id));
+    assert_eq!(edited, text);
+    edited.body = "Изменено".into();
+    edited.italic = true;
+    pixels[index] = Color::BLACK;
+    app.event(Event::TextLayerEdited {
+        document,
+        target,
+        text: edited.clone(),
+        pixels: pixels.clone(),
+    });
+    assert_eq!(app.doc.undo_count(), 1);
+    assert!(app.doc.undo());
+    assert_eq!(app.doc.to_bytes().unwrap(), saved);
+    assert!(app.doc.redo());
+    assert_eq!(app.doc.active_layer().text.as_ref(), Some(&edited));
+    app.doc.layers[app.doc.active].locked = true;
+    let before = app.doc.to_bytes().unwrap();
+    assert!(!click(&mut app)
+        .iter()
+        .any(|e| matches!(e, Effect::EditTextLayer { .. })));
+    app.event(Event::TextLayerEdited {
+        document: document + 1,
+        target: None,
+        text: edited,
+        pixels,
+    });
+    assert_eq!(app.doc.to_bytes().unwrap(), before);
 }

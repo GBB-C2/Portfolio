@@ -113,8 +113,7 @@ fn settings_option(app: &mut PortfolioApp, query: &str, index: usize) {
 }
 
 fn tool_viewport_point(app: &mut PortfolioApp, language: Language) -> Option<(f32, f32)> {
-    let labels =
-        ["Основные", "Отпечаток", "Образец", "Заливка"].map(|text| language.translate(text));
+    let labels = ["Основные", "Отпечаток", "Штрих", "Заливка"].map(|text| language.translate(text));
     app.render()
         .texts
         .iter()
