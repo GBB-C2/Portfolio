@@ -29,6 +29,10 @@ mod tests;
 mod brush_presets;
 use brush_presets::Presets;
 
+#[path = "color_disc.rs"]
+mod color_disc;
+use color_disc::ColorDisc;
+
 #[path = "canvas_text_ui.rs"]
 mod canvas_text_ui;
 use canvas_text_ui::TextDraft;
@@ -494,21 +498,21 @@ impl PortfolioApp {
                 c.label = tip.into();
             }
         }
-        let color_button = Rect::new(bar.x + 168., bar.y + 8., 36., 32.);
+        let color_button = self.color_trigger();
         let before = self.controls.len();
         self.button(
             p,
             color_button,
-            Action::Inspector(false),
+            Action::ColorDisc,
             "",
             None,
-            !self.inspector_layers,
-            true,
+            self.color_disc.open,
+            !self.busy,
             false,
         );
         if self.controls.len() > before {
             if let Some(control) = self.controls.last_mut() {
-                control.label = "Цвет · открыть палитру".into();
+                control.label = "Цветовой круг".into();
             }
         }
         let (cx, cy) = (
@@ -1707,6 +1711,9 @@ enum Action {
     TextEffect(EffectParam),
     SetAnimations(bool),
     Inspector(bool),
+    ColorDisc,
+    DiscHue,
+    DiscSV,
     BrowserSearch,
     CloseBrowserSearch,
     ClearBrowserSearch,
@@ -1760,13 +1767,10 @@ enum Action {
     TextPreset(TextPreset),
     CycleTextAlign,
     EffectColor,
-    ApplyText,
-    CancelText,
     TextFont(bool),
     TextBold,
     TextItalic,
     TextAlign(ParagraphAlign),
-    TextColor,
     TextX,
     TextY,
     Visible(usize),
@@ -1974,7 +1978,7 @@ enum Drag {
         action: Action,
         rect: Rect,
         initial: Color,
-        initial_h: f32,
+        initial_hsv: (f32, f32, f32),
     },
 }
 #[derive(Clone, Copy)]
@@ -2059,7 +2063,7 @@ pub struct PortfolioApp {
         Option<TextPreset>,
         (TextLayer, u32, u32, Language, Option<Vec<Color>>),
     >,
-    draft_effects: Option<(TextLayer, u32, u32, Language, Option<TextTile>)>,
+    draft_effects: Option<(TextLayer, u32, u32, Language, bool, Option<TextTile>)>,
     place_new_text: bool,
     text_renderer: fn(&TextLayer, u32, u32, Language) -> Result<Vec<Color>, String>,
     tool_popup: Option<ToolPanel>,
@@ -2070,6 +2074,7 @@ pub struct PortfolioApp {
     shape_filled: bool,
     shape_settings: ToolSettings,
     last_shape: Tool,
+    color_disc: ColorDisc,
     color_h: f32,
     color_s: f32,
     color_v: f32,
@@ -2232,25 +2237,23 @@ impl PortfolioApp {
         if properties_keyboard && a.is_parameter() {
             self.pending_focus = Some(a);
         }
-        let keeps_chooser = (self.tool_settings_visible()
-            || (self.tool == Tool::Text
-                && (Self::text_row(a).is_some()
-                    || matches!(
-                        a,
-                        Action::NewText
-                            | Action::CycleTextAlign
-                            | Action::ApplyText
-                            | Action::CancelText
-                            | Action::TextPreset(_)
-                    ))))
-            && !matches!(
-                a,
-                Action::Settings | Action::File | Action::Help | Action::Focus
-            );
+        let keeps_chooser = self.color_disc.open
+            || (self.tool_settings_visible()
+                || (self.tool == Tool::Text
+                    && (Self::text_row(a).is_some()
+                        || matches!(
+                            a,
+                            Action::NewText | Action::CycleTextAlign | Action::TextPreset(_)
+                        ))))
+                && !matches!(
+                    a,
+                    Action::Settings | Action::File | Action::Help | Action::Focus
+                );
         if !keeps_chooser
             && !matches!(
                 a,
                 Action::ToolPanel(_)
+                    | Action::ColorDisc
                     | Action::ToolProperties
                     | Action::CloseToolProperties
                     | Action::ToolSection(_)
@@ -2270,7 +2273,15 @@ impl PortfolioApp {
             self.close_tool_popup();
         }
         match a {
-            Action::NoOp => {}
+            Action::NoOp | Action::DiscHue | Action::DiscSV => {}
+            Action::ColorDisc => {
+                self.color_disc.open = true;
+                self.pending_properties_focus = false;
+                self.space = false;
+                self.pending_focus = Some(Action::DiscHue);
+                self.controls.clear();
+                self.hover = None;
+            }
             Action::File => {
                 self.overlay = if self.overlay == Overlay::File {
                     Overlay::None
@@ -2698,13 +2709,10 @@ impl PortfolioApp {
             | Action::CycleTextAlign
             | Action::EffectColor
             | Action::NewText
-            | Action::ApplyText
-            | Action::CancelText
             | Action::TextFont(_)
             | Action::TextBold
             | Action::TextItalic
             | Action::TextAlign(_)
-            | Action::TextColor
             | Action::TextX
             | Action::TextY => self.text_action(a, out),
             Action::EditTextLayer(id) => self.open_canvas_text(Some(id), 0, 0, out),
@@ -2853,10 +2861,6 @@ impl PortfolioApp {
                 Some(c) => self.current_text_mut().effects.color = c,
                 None => self.error("Шесть символов HEX, например #365AD7", out),
             },
-            26 => match parse_hex(&value) {
-                Some(color) => self.current_text_mut().color = color,
-                None => self.error("Шесть символов HEX, например #365AD7", out),
-            },
             27 | 28 => {
                 if self.draft.is_none() {
                     return;
@@ -2966,10 +2970,12 @@ impl PortfolioApp {
                 action, initial, ..
             } => self.set_parameter(action, initial),
             Drag::Color {
-                initial, initial_h, ..
+                initial,
+                initial_hsv,
+                ..
             } => {
-                self.color_h = initial_h;
-                self.update_color(initial);
+                (self.color_h, self.color_s, self.color_v) = initial_hsv;
+                self.set_ink(initial);
             }
             Drag::Pan { ox, oy, .. } => {
                 self.view_x = ox;
@@ -3101,15 +3107,7 @@ impl PortfolioApp {
                     _ => {}
                 }
             }
-            Drag::Color { action, rect, .. } => {
-                if action == Action::SV {
-                    self.color_s = ((x - rect.x) / rect.w).clamp(0., 1.);
-                    self.color_v = (1. - (y - rect.y) / rect.h).clamp(0., 1.);
-                } else {
-                    self.color_h = (((x - rect.x) / rect.w).clamp(0., 1.) * 360.).rem_euclid(360.);
-                }
-                self.set_ink(hsv(self.color_h, self.color_s, self.color_v));
-            }
+            Drag::Color { action, rect, .. } => self.update_color_drag(action, rect, x, y),
             Drag::None => {}
         }
     }
@@ -3122,6 +3120,10 @@ impl PortfolioApp {
         out: &mut Vec<Effect>,
     ) {
         self.pointer = (x, y);
+        if self.color_disc.open {
+            self.color_disc_mouse(x, y, button, modifiers, out);
+            return;
+        }
         if self.tool_properties_ui.name_edit.is_some() {
             if self.preset_name_rect().contains(x, y) {
                 if button == MouseButton::Left {
@@ -3216,7 +3218,11 @@ impl PortfolioApp {
                 c.enabled
                     && matches!(
                         c.action,
-                        Action::ToolPanel(_) | Action::Size | Action::Opacity | Action::MoveToolbar
+                        Action::ToolPanel(_)
+                            | Action::ColorDisc
+                            | Action::Size
+                            | Action::Opacity
+                            | Action::MoveToolbar
                     )
             });
             if !family_button {
@@ -3358,13 +3364,7 @@ impl PortfolioApp {
                     self.update_drag(x, y, modifiers);
                 }
                 Action::SV | Action::Hue => {
-                    self.drag = Drag::Color {
-                        action: c.action,
-                        rect: c.rect,
-                        initial: self.brush.color,
-                        initial_h: self.color_h,
-                    };
-                    self.update_drag(x, y, modifiers);
+                    self.begin_color_drag(c.action, c.rect, x, y, modifiers)
                 }
                 _ => self.activate(c.action, out),
             }
@@ -3475,6 +3475,12 @@ impl PortfolioApp {
         }
     }
     fn key(&mut self, code: u32, pressed: bool, repeat: bool, m: Modifiers, out: &mut Vec<Effect>) {
+        if self.color_disc.open {
+            if pressed {
+                self.color_disc_key(code, m, out);
+            }
+            return;
+        }
         let escape_draft = code == 27
             && matches!(self.drag, Drag::None)
             && !self
@@ -3802,7 +3808,7 @@ impl PortfolioApp {
                         }
                         Action::Hue => {
                             self.color_h = (self.color_h + d * k).rem_euclid(360.);
-                            self.set_ink(hsv(self.color_h, self.color_s, self.color_v));
+                            self.apply_hsv();
                         }
                         Action::SV => {
                             if code == 37 || code == 39 {
@@ -3810,7 +3816,7 @@ impl PortfolioApp {
                             } else {
                                 self.color_v = (self.color_v + d * k / 100.).clamp(0., 1.);
                             }
-                            self.set_ink(hsv(self.color_h, self.color_s, self.color_v));
+                            self.apply_hsv();
                         }
                         _ => {}
                     }
@@ -3998,8 +4004,20 @@ impl NativeApp for PortfolioApp {
         p.font = self.ui_font;
         p.font_scale = self.font_size as f32 / 13.;
         p.language = self.language;
+        let popup_input = self.color_disc.open.then(|| {
+            (
+                self.focus.take(),
+                self.hover.take(),
+                self.pending_focus.take(),
+            )
+        });
         self.draw_editor(&mut p);
         self.draw_closing_overlay(&mut p);
+        if let Some((focus, hover, pending)) = popup_input {
+            self.controls.clear();
+            (self.focus, self.hover, self.pending_focus) = (focus, hover, pending);
+            self.draw_color_disc(&mut p);
+        }
         p.frame
     }
     fn event(&mut self, event: Event) -> Vec<Effect> {
@@ -4057,6 +4075,7 @@ impl NativeApp for PortfolioApp {
                 modifiers,
             } => {
                 if self.draft.is_some()
+                    && !self.color_disc.open
                     && button == MouseButton::Left
                     && (matches!(
                         self.drag,
@@ -4073,6 +4092,7 @@ impl NativeApp for PortfolioApp {
                 if !matches!(
                     self.drag,
                     Drag::Slider { .. }
+                        | Drag::Color { .. }
                         | Drag::Browser { .. }
                         | Drag::VerticalScroll { .. }
                         | Drag::Panel { .. }
@@ -4137,9 +4157,10 @@ impl NativeApp for PortfolioApp {
                 delta,
                 modifiers,
             } => {
-                if self
-                    .tool_row_relayout_guard
-                    .is_some_and(|r| r.contains(x, y))
+                if self.color_disc.open
+                    || self
+                        .tool_row_relayout_guard
+                        .is_some_and(|r| r.contains(x, y))
                     || self.closing_surface_contains(x, y)
                     || self.quick_preview_contains(x, y)
                 {
@@ -4289,6 +4310,9 @@ impl NativeApp for PortfolioApp {
             }
             Event::FileSelected { kind, path } => self.selected_file(kind, path, &mut out),
             Event::Text(value) | Event::Paste(value) => {
+                if self.color_disc.open {
+                    return out;
+                }
                 if let Some(edit) = self.tool_properties_ui.name_edit.as_mut() {
                     edit.insert(&value);
                 } else if self.overlay == Overlay::Settings {
@@ -4456,6 +4480,7 @@ impl PortfolioApp {
                 ..ToolSettings::preset(BrushKind::Ink, false)
             },
             last_shape: Tool::Rectangle,
+            color_disc: ColorDisc::default(),
             color_h: h,
             color_s: s,
             color_v: v,
@@ -5445,8 +5470,10 @@ impl PortfolioApp {
         true
     }
     fn canvas_obscured(&self, x: f32, y: f32) -> bool {
-        self.tool_row_relayout_guard
-            .is_some_and(|r| r.contains(x, y))
+        (self.color_disc.open && self.color_popup_rect().contains(x, y))
+            || self
+                .tool_row_relayout_guard
+                .is_some_and(|r| r.contains(x, y))
             || self.closing_surface_contains(x, y)
             || !self.focused_mode
                 && (self.top_tools_rect().contains(x, y)
@@ -5585,13 +5612,25 @@ impl PortfolioApp {
     }
     fn set_ink(&mut self, c: Color) {
         self.brush.color = c;
-        self.current_text_mut().color = c;
+        self.text_style.color = c;
+        if let Some(draft) = &mut self.draft {
+            draft.text.color = c;
+        }
+    }
+    fn apply_hsv(&mut self) {
+        let color = Color {
+            a: self.brush.color.a,
+            ..hsv(self.color_h, self.color_s, self.color_v)
+        };
+        self.set_ink(color);
     }
     fn update_color(&mut self, c: Color) {
         self.set_ink(c);
         let (h, s, v) = to_hsv(c, self.color_h);
         self.color_h = h;
-        self.color_s = s;
+        if v > 0. {
+            self.color_s = s;
+        }
         self.color_v = v;
     }
     fn remember(&mut self) {
@@ -5607,6 +5646,7 @@ impl PortfolioApp {
         }
     }
     fn reset_document(&mut self, doc: Document, path: Option<PathBuf>, unsaved: bool) {
+        self.color_disc.open = false;
         self.draft = None;
         self.place_new_text = false;
         self.document_id = self.document_id.wrapping_add(1);
@@ -5993,9 +6033,7 @@ impl PortfolioApp {
                 | Action::TextBold
                 | Action::TextItalic
                 | Action::TextFont(true)
-                | Action::TextColor
                 | Action::NewText
-                | Action::ApplyText
         ) || !self.tool_settings_visible()
             || self.pending_properties_focus
                 == self
@@ -6492,7 +6530,7 @@ impl PortfolioApp {
             }
             Slider::Hue => {
                 self.color_h = to_hsv(Color::from_hex(DEFAULT_INK), 220.).0;
-                self.set_ink(hsv(self.color_h, self.color_s, self.color_v));
+                self.apply_hsv();
                 self.remember();
                 return;
             }

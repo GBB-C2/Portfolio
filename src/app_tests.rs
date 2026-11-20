@@ -5352,7 +5352,7 @@ fn canvas_text_creation_and_reediting_use_document_coordinates_and_one_undo_step
         value: Some("65".into()),
     });
     app.event(Event::Prompted {
-        id: 26,
+        id: 10,
         value: Some("#6A3281".into()),
     });
     let text = app.canvas_editor().unwrap().text;
@@ -5360,7 +5360,7 @@ fn canvas_text_creation_and_reediting_use_document_coordinates_and_one_undo_step
     assert_eq!(text.color.to_hex(), "#6A3281");
     assert!(text.bold && text.body.contains('🌿'));
     assert_eq!(text.align, ParagraphAlign::Center);
-    click_action(&mut app, Action::ApplyText);
+    press_key(&mut app, 13, true);
     assert!(app.canvas_editor().is_none());
     let id = app.doc.active_layer().id;
     assert_eq!(app.doc.undo_count(), 1);
@@ -5406,7 +5406,7 @@ fn canvas_text_creation_and_reediting_use_document_coordinates_and_one_undo_step
     click_action(&mut app, Action::NewText);
     place(&mut app);
     assert_eq!(app.draft.as_ref().unwrap().target, None);
-    click_action(&mut app, Action::CancelText);
+    press_key(&mut app, 27, false);
     assert_eq!(app.doc.undo_count(), 1);
 }
 
@@ -5608,7 +5608,7 @@ fn text_catalog_basics_and_gear_edit_one_canvas_draft_without_touching_brush_con
     });
     assert_eq!(app.current_text().effects.color, Color::from_hex(0xab3572));
     app.text_renderer = anchor_raster; // the native renderer is covered independently
-    click_action(&mut app, Action::ApplyText);
+    press_key(&mut app, 13, true);
     assert_eq!(app.doc.undo_count(), 1);
     assert_eq!(
         app.doc
@@ -5625,4 +5625,193 @@ fn text_catalog_basics_and_gear_edit_one_canvas_draft_without_touching_brush_con
         ToolSettings::from_brush(app.brush),
         ToolSettings::from_brush(brush)
     );
+}
+
+#[test]
+fn toolbar_disc_updates_one_text_draft_and_gives_its_caret_back() {
+    let mut app = floating_panel_fixture();
+    app.text_renderer = anchor_raster;
+    click_action(&mut app, Action::ToolPanel(ToolPanel::Text));
+    click_action(&mut app, Action::ToolProperties);
+    left_down(&mut app, 810., 650.);
+    left_up(&mut app, 810., 650.);
+    let session = app.canvas_editor().unwrap().session;
+    app.event(Event::CanvasTextChanged {
+        session,
+        body: "Линия цвета".into(),
+    });
+    click_action(&mut app, Action::ColorDisc);
+    assert!(app.color_disc.open && app.tool_settings_visible());
+    let p = app.color_popup_rect();
+    let r = app.wheel_rect();
+    let (cx, cy) = (r.x + r.w / 2., r.y + r.h / 2.);
+    let saved = app.current_text().clone();
+    left_down(&mut app, cx + r.w * 0.46, cy);
+    left_up(&mut app, cx + r.w * 0.46, cy);
+    assert!((app.color_h - 90.).abs() < 0.001);
+    left_down(&mut app, cx, cy);
+    left_up(&mut app, cx, cy);
+    assert_eq!(app.current_text().color, hsv(90., 0.5, 0.5));
+    assert_eq!(app.brush.color, app.current_text().color);
+    assert_eq!(app.canvas_editor().unwrap().session, session);
+    assert_eq!(app.current_text().body, saved.body);
+    assert!(app
+        .canvas_editor()
+        .unwrap()
+        .panels
+        .iter()
+        .any(|rect| rect[0] <= p.x as i32 && rect[2] >= (p.x + p.w) as i32));
+    let effects = click_action(&mut app, Action::Hex);
+    assert!(effects
+        .iter()
+        .any(|e| matches!(e, Effect::Prompt { id: 10, .. })));
+    app.event(Event::Prompted {
+        id: 10,
+        value: Some("#542577".into()),
+    });
+    assert_eq!(app.current_text().color, Color::from_hex(0x542577));
+    let close = press_key(&mut app, 27, false);
+    assert!(!app.color_disc.open && app.tool_settings_visible());
+    assert!(close.iter().any(|e| matches!(e, Effect::FocusCanvasText)));
+    assert_eq!(app.doc.undo_count(), 0);
+    assert_eq!(app.tool_popup, Some(ToolPanel::Text));
+    press_key(&mut app, 13, true);
+    let layer = app.doc.active_layer();
+    assert_eq!(
+        layer.text.as_ref().unwrap().color,
+        Color::from_hex(0x542577)
+    );
+    let id = layer.id;
+    assert_eq!(app.doc.undo_count(), 1);
+    app.update_color(Color::WHITE);
+    app.activate(Action::EditTextLayer(id), &mut Vec::new());
+    assert_eq!(app.brush.color, Color::from_hex(0x542577));
+    assert_eq!(app.doc.undo_count(), 1);
+}
+
+#[test]
+fn color_disc_owns_its_gesture_dismissal_and_keyboard_in_both_themes() {
+    let mut app = floating_panel_fixture();
+    app.inspector_layers = true;
+    for (dark, scale) in [(true, 1.), (false, 1.5)] {
+        app.dark = dark;
+        app.resize((884. * scale) as u32, (581. * scale) as u32, scale);
+        app.set_panel_position(PanelKind::Toolbar, Some((16., 505.)));
+        click_action(&mut app, Action::ColorDisc);
+        let p = app.color_popup_rect();
+        let trigger = app.color_trigger();
+        assert!(p.y >= 8. && p.y + p.h < trigger.y && p.x >= 0. && p.x + p.w <= app.w());
+        assert!(app.inspector_layers);
+        let wheel = app.wheel_rect();
+        let (cx, cy) = (wheel.x + wheel.w * 0.5, wheel.y + wheel.h * 0.5);
+        let baseline = (app.brush.color, app.color_h, app.color_s, app.color_v);
+        left_down(&mut app, cx + wheel.w * 0.398, cy); // gap between hue and SV
+        assert!(matches!(app.drag, Drag::None));
+        left_up(&mut app, cx + wheel.w * 0.398, cy);
+        left_down(&mut app, cx, cy - wheel.h * 0.46);
+        app.event(Event::MouseMove {
+            x: cx + wheel.w,
+            y: cy,
+            modifiers: Modifiers::default(),
+        });
+        assert_eq!(app.color_h, 90.);
+        assert_eq!((app.color_s, app.color_v), (baseline.2, baseline.3));
+        app.event(Event::CaptureLost);
+        assert_eq!(
+            (app.brush.color, app.color_h, app.color_s, app.color_v),
+            baseline
+        );
+        left_down(&mut app, cx, cy);
+        press_key(&mut app, 27, false);
+        assert!(app.color_disc.open);
+        assert_eq!(app.brush.color, baseline.0);
+        app.render();
+        app.event(Event::Prompted {
+            id: 10,
+            value: Some("808080".into()),
+        });
+        let remembered = app.color_h;
+        press_key(&mut app, 39, false); // last focus was saturation/value
+        assert!(app.color_s > 0. && (app.color_h - remembered).abs() < 0.001);
+        click_action(&mut app, Action::Swatch(2));
+        assert_eq!(app.brush.color, Color::from_hex(PALETTE[2]));
+        let zoom = app.zoom;
+        app.event(Event::Wheel {
+            x: cx,
+            y: cy,
+            delta: 1.,
+            modifiers: Modifiers::default(),
+        });
+        assert_eq!(app.zoom, zoom);
+        left_down(&mut app, 470., 410.);
+        left_up(&mut app, 470., 410.);
+        assert!(!app.color_disc.open);
+        assert_eq!(app.doc.undo_count(), 0);
+        click_action(&mut app, Action::ColorDisc);
+        press_key(&mut app, 9, false);
+        press_key(&mut app, 9, false);
+        let edit = press_key(&mut app, 13, false);
+        assert!(edit
+            .iter()
+            .any(|e| matches!(e, Effect::Prompt { id: 10, .. })));
+        left_down(&mut app, trigger.x + 18., trigger.y + 16.);
+        left_up(&mut app, trigger.x + 18., trigger.y + 16.);
+        assert!(!app.color_disc.open);
+    }
+}
+
+#[test]
+fn text_properties_use_the_brush_navigation_and_the_basic_strip_has_six_controls() {
+    let mut app = floating_panel_fixture();
+    app.resize(884, 581, 1.);
+    click_action(&mut app, Action::ToolPanel(ToolPanel::Text));
+    click_action(&mut app, Action::PinToolPanel);
+    click_action(&mut app, Action::ToolProperties);
+    app.render();
+    let bar = app.quick_controls_rect();
+    let actions: Vec<_> = app
+        .controls
+        .iter()
+        .filter(|c| c.enabled && bar.contains(c.hit.x + c.hit.w / 2., c.hit.y + c.hit.h / 2.))
+        .map(|c| c.action)
+        .collect();
+    assert_eq!(
+        actions,
+        [
+            Action::TextSize,
+            Action::TextFont(true),
+            Action::TextBold,
+            Action::TextItalic,
+            Action::CycleTextAlign,
+            Action::NewText
+        ]
+    );
+    let mut last = None;
+    for section in 0..3 {
+        click_action(&mut app, Action::ToolSection(section));
+        app.render();
+        let nav = app
+            .controls
+            .iter()
+            .find(|c| c.enabled && c.action == Action::ToolSection(section))
+            .unwrap()
+            .rect;
+        let body = app.tool_settings_viewport();
+        assert!(nav.x + nav.w <= body.x && nav.y >= body.y);
+        if let Some((nx, ny)) = last {
+            assert_eq!(nav.x, nx);
+            assert!(nav.y > ny);
+        }
+        last = Some((nav.x, nav.y));
+        let expected = [
+            Action::TextSize,
+            Action::TextEffect(EffectParam::Outline),
+            Action::TextEffect(EffectParam::Depth),
+        ][section as usize];
+        assert!(app
+            .controls
+            .iter()
+            .any(|c| c.enabled && c.action == expected && body.intersects(c.hit)));
+        assert!(app.text_samples.contains_key(&None));
+    }
 }
