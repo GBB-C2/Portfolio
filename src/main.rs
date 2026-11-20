@@ -444,9 +444,6 @@ fn main() {
                 key(&mut app, 27, false);
             }
             click(&mut app, bx + 26. + family.index() as f32 * 40., 104.);
-            let standard_width: f32 = if family == Family::Shapes { 380. } else { 464. };
-            let initial_x = (bx + 8. + family.index() as f32 * 40.)
-                .clamp(16., (logical_width - standard_width - 16.).max(16.));
             if let Some(i) = brush {
                 let kind = BrushKind::from_index(i as u8);
                 let item = if family == Family::Eraser {
@@ -463,19 +460,14 @@ fn main() {
                 key(&mut app, 13, false);
                 key(&mut app, 27, false);
             }
+            let Some(popup) = app.tool_popup_rect() else {
+                eprintln!("The requested tool catalog is not visible.");
+                std::process::exit(2);
+            };
             if has("--pin-panel") {
-                click(&mut app, initial_x + standard_width - 22., 162.);
+                click(&mut app, popup.x + popup.w - 22., popup.y + 26.);
             }
-            let popup_width = if has("--pin-panel") {
-                standard_width.min((logical_width - 640.).max(244.))
-            } else {
-                standard_width
-            };
-            let px = if has("--pin-panel") {
-                (logical_width - popup_width) / 2.
-            } else {
-                initial_x
-            };
+            let (px, popup_width) = (popup.x, popup.w);
             let items_width = popup_width - 56.;
             let selected_slot = if let Some(query) = shape_kind {
                 let mut browser = Browser::default();
@@ -638,23 +630,12 @@ fn main() {
             for _ in 0..3 {
                 key(&mut app, 27, false);
             }
-            let (group_x, group_width, group_y) = if has("--pin-panel") {
-                let chooser_width = if family == Family::Shapes {
-                    380_f32
-                } else {
-                    464_f32
-                }
-                .min((logical_width - 640.).max(244.));
-                ((logical_width - chooser_width) / 2., chooser_width, 244.)
-            } else {
-                let width = (logical_width - 640.).clamp(244., 544.);
-                ((logical_width - width) / 2., width, 136.)
-            };
-            let card_width = (group_width - 12.) / 2.;
-            let track_x = group_x + index * (card_width + 12.) + 12.;
+            let group = app.quick_controls_rect();
+            let card_width = (group.w - 12.) / 2.;
+            let track_x = group.x + index * (card_width + 12.) + 12.;
             let track_width = card_width - 76.;
             let x = track_x + track_width * (value - min) / (max - min);
-            let y = group_y + 20.;
+            let y = group.y + 20.;
             app.event(Event::MouseDown {
                 x,
                 y,
@@ -672,14 +653,9 @@ fn main() {
         // have been addressed at their default positions. The groups move
         // independently: first the pinned chooser, then the main toolbar.
         if let Some((dx, dy)) = chooser_offset {
-            let width = if family == Family::Shapes {
-                380_f32
-            } else {
-                464_f32
+            if let Some(popup) = app.tool_popup_rect() {
+                drag_panel(&mut app, popup.x + popup.w - 22., popup.y + 26., dx, dy);
             }
-            .min((logical_width - 640.).max(244.));
-            let x = (logical_width - width) / 2. + width - 22.;
-            drag_panel(&mut app, x, 162., dx, dy);
         }
         if let Some((dx, dy)) = toolbar_offset {
             drag_panel(

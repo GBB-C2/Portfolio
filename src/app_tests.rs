@@ -632,9 +632,9 @@ fn browser_clicks_select_on_release_but_dragging_either_row_never_selects_or_pai
             left_down(&mut app, x, y);
             assert_eq!(app.selected_tool_option(), initial_option);
             assert_eq!(app.browser.view(family).category, Category::All);
-            assert!(matches!(app.drag, Drag::Browser { moved: false, .. }));
+            assert!(matches!(app.drag, Drag::List { moved: false, .. }));
             pointer_move(&mut app, x + 4., y);
-            assert!(matches!(app.drag, Drag::Browser { moved: false, .. }));
+            assert!(matches!(app.drag, Drag::List { moved: false, .. }));
             assert_eq!(app.browser.view(family).items.offset, 0.);
             left_up(&mut app, x + 4., y);
             match action {
@@ -660,7 +660,7 @@ fn browser_clicks_select_on_release_but_dragging_either_row_never_selects_or_pai
             let (x, y) = control_center(&mut app, drag_action);
             left_down(&mut app, x, y);
             pointer_move(&mut app, x - 26., y);
-            assert!(matches!(app.drag, Drag::Browser { moved: true, .. }));
+            assert!(matches!(app.drag, Drag::List { moved: true, .. }));
             let offset = match row {
                 BrowserRow::Items => app.browser.view(family).items,
                 BrowserRow::Categories => app.browser.view(family).categories,
@@ -1670,18 +1670,23 @@ fn shape_fill_checkbox_drives_exact_live_raster_and_line_remains_outline_only() 
 }
 
 #[test]
-fn pinned_chooser_is_centered_above_quick_cards_follows_tools_and_allows_canvas_painting() {
+fn pinned_chooser_stays_at_its_anchor_follows_tools_and_allows_canvas_painting() {
     for (width, height, font_size) in [(1440, 940, 13), (884, 581, 17)] {
         let mut app = floating_panel_fixture();
         app.resize(width, height, 1.);
         app.font_size = font_size;
         let before = app.doc.to_bytes().unwrap();
         click_action(&mut app, Action::ToolPanel(ToolPanel::Brush));
+        let original = app.tool_popup_rect().unwrap();
         let old_pin = control_center(&mut app, Action::PinToolPanel);
         click_action(&mut app, Action::PinToolPanel);
         assert!(app.tool_panel_pinned);
         // The second click of a double click can still target the old frame.
-        // Pinning relocates the row before that frame has been repainted.
+        // The quick row has appeared, but the new controls have not been painted yet.
+        assert_eq!(
+            rect_coordinates(app.tool_popup_rect().unwrap()),
+            rect_coordinates(original)
+        );
         left_down(&mut app, old_pin.0, old_pin.1);
         assert!(matches!(app.drag, Drag::None));
         left_up(&mut app, old_pin.0, old_pin.1);
@@ -1704,7 +1709,7 @@ fn pinned_chooser_is_centered_above_quick_cards_follows_tools_and_allows_canvas_
             let chooser = app.tool_popup_rect().unwrap();
             let quick = app.quick_controls_rect();
             assert_eq!((chooser.y, chooser.h), (136., 96.));
-            assert_eq!(chooser.x + chooser.w * 0.5, width as f32 * 0.5);
+            assert_eq!(chooser.x, original.x);
             assert_eq!(quick.x, chooser.x);
             assert_eq!(quick.w, chooser.w);
             assert_eq!(quick.y, chooser.y + chooser.h + 12.);
@@ -1945,12 +1950,12 @@ fn moving_toolbar_translates_its_controls_and_anchor_while_pinned_chooser_moves_
     );
 
     click_action(&mut app, Action::ToolPanel(ToolPanel::Brush));
+    let anchor = app.tool_popup_rect().unwrap();
     click_action(&mut app, Action::PinToolPanel);
     app.render();
     let pinned = app.tool_popup_rect().unwrap();
     let pinned_quick = app.quick_controls_rect();
-    assert_eq!(pinned.x + pinned.w * 0.5, app.w() * 0.5);
-    assert_eq!(pinned.y, 136.);
+    assert_eq!(rect_coordinates(pinned), rect_coordinates(anchor));
     let (x, y) = control_center(&mut app, Action::MoveToolbar);
     left_down(&mut app, x, y);
     pointer_move(&mut app, x - 90., y + 180.);
@@ -2014,7 +2019,11 @@ fn moving_toolbar_translates_its_controls_and_anchor_while_pinned_chooser_moves_
 
 #[test]
 fn panel_drag_interruptions_restore_default_or_custom_positions_without_canvas_leaks() {
-    for kind in [PanelKind::Toolbar, PanelKind::Chooser] {
+    for kind in [
+        PanelKind::Toolbar,
+        PanelKind::Chooser,
+        PanelKind::Properties,
+    ] {
         for interruption in 0..3 {
             let mut app = floating_panel_fixture();
             let before = app.doc.to_bytes().unwrap();
@@ -2022,6 +2031,10 @@ fn panel_drag_interruptions_restore_default_or_custom_positions_without_canvas_l
             let settings = ToolSettings::from_brush(app.brush);
             let action = match kind {
                 PanelKind::Toolbar => Action::MoveToolbar,
+                PanelKind::Properties => {
+                    press_key(&mut app, 115, false);
+                    Action::MoveToolProperties
+                }
                 PanelKind::Chooser => {
                     click_action(&mut app, Action::ToolPanel(ToolPanel::Brush));
                     click_action(&mut app, Action::PinToolPanel);
@@ -2035,24 +2048,18 @@ fn panel_drag_interruptions_restore_default_or_custom_positions_without_canvas_l
                 left_up(&mut app, x + 40., y + 30.);
                 app.render();
             }
-            let initial = match kind {
-                PanelKind::Toolbar => app.toolbar_position,
-                PanelKind::Chooser => app.chooser_position,
-            };
-            assert_eq!(initial.is_some(), interruption > 0);
-            let initial_bounds = match kind {
-                PanelKind::Toolbar => app.top_tools_rect(),
-                PanelKind::Chooser => app.tool_popup_rect().unwrap(),
-            };
+            let initial = app.panel_position(kind);
+            assert_eq!(
+                initial.is_some(),
+                interruption > 0 || kind == PanelKind::Chooser
+            );
+            let initial_bounds = app.panel_rect(kind);
             let (x, y) = control_center(&mut app, action);
             left_down(&mut app, x, y);
             pointer_move(&mut app, x + 100., y + 180.);
             app.render();
             assert!(matches!(app.drag, Drag::Panel { moved: true, .. }));
-            let moved = match kind {
-                PanelKind::Toolbar => app.toolbar_position,
-                PanelKind::Chooser => app.chooser_position,
-            };
+            let moved = app.panel_position(kind);
             assert_ne!(moved, initial);
             for button in [MouseButton::Right, MouseButton::Middle] {
                 app.event(Event::MouseDown {
@@ -2068,13 +2075,7 @@ fn panel_drag_interruptions_restore_default_or_custom_positions_without_canvas_l
                     modifiers: Modifiers::default(),
                 });
                 assert!(matches!(app.drag, Drag::Panel { moved: true, .. }));
-                assert_eq!(
-                    match kind {
-                        PanelKind::Toolbar => app.toolbar_position,
-                        PanelKind::Chooser => app.chooser_position,
-                    },
-                    moved
-                );
+                assert_eq!(app.panel_position(kind), moved);
             }
             match interruption {
                 0 => {
@@ -2088,18 +2089,9 @@ fn panel_drag_interruptions_restore_default_or_custom_positions_without_canvas_l
                 }
             }
             assert!(matches!(app.drag, Drag::None));
+            assert_eq!(app.panel_position(kind), initial);
             assert_eq!(
-                match kind {
-                    PanelKind::Toolbar => app.toolbar_position,
-                    PanelKind::Chooser => app.chooser_position,
-                },
-                initial
-            );
-            assert_eq!(
-                rect_coordinates(match kind {
-                    PanelKind::Toolbar => app.top_tools_rect(),
-                    PanelKind::Chooser => app.tool_popup_rect().unwrap(),
-                }),
+                rect_coordinates(app.panel_rect(kind)),
                 rect_coordinates(initial_bounds)
             );
             left_up(&mut app, x + 100., y + 180.); // A late release cannot commit the cancelled position.
@@ -2172,7 +2164,7 @@ fn movable_panels_clamp_with_resize_and_support_keyboard_and_independent_resets(
         assert!(rect.x + rect.w <= app.w() - 16. && rect.y + rect.h <= app.h() - 16.);
     }
     assert_eq!(quick.x, chooser.x);
-    assert_eq!(quick.y, chooser.y + chooser.h + 12.);
+    assert_eq!(quick.y + quick.h + 12., chooser.y);
     let chooser_position = app.chooser_position;
     for _ in 0..=app.controls.len() {
         if focused_action(&app) == Some(Action::MoveToolbar) {
@@ -2256,7 +2248,7 @@ fn movable_panels_clamp_with_resize_and_support_keyboard_and_independent_resets(
     assert_eq!(app.toolbar_position, None);
     assert_eq!(app.chooser_position, None);
     let chooser = app.tool_popup_rect().unwrap();
-    assert_eq!(chooser.x + chooser.w * 0.5, app.w() * 0.5);
+    assert_eq!(chooser.x, app.tool_family_rect(ToolPanel::Brush).x);
     assert_eq!(chooser.y, 136.);
     assert!(app.tool_panel_pinned);
     app.chooser_position = Some((16., 220.));
@@ -2271,7 +2263,7 @@ fn movable_panels_clamp_with_resize_and_support_keyboard_and_independent_resets(
         .browser_items_rect(ToolPanel::Brush)
         .contains(100., 232.));
     left_down(&mut app, 100., 232.);
-    assert!(!matches!(app.drag, Drag::Browser { .. }));
+    assert!(!matches!(app.drag, Drag::List { .. }));
     assert_eq!(
         app.tool_settings_section(),
         2,
@@ -2892,6 +2884,7 @@ fn modeless_tool_properties_share_input_with_chooser_quick_controls_inspector_an
             }
             assert_eq!(focused_action(&app), Some(Action::CloseToolProperties));
             for action in [
+                Action::MoveToolProperties,
                 Action::RenameBrush,
                 Action::AddBrush,
                 Action::ToolSection(0),
@@ -2943,12 +2936,15 @@ fn modeless_tool_properties_share_input_with_chooser_quick_controls_inspector_an
             assert!(app
                 .controls
                 .iter()
-                .any(|c| c.enabled && c.action == Action::Hex));
+                .any(|c| c.enabled && c.action == Action::AddLayer));
+            assert!(!app.controls.iter().any(|c| c.action == Action::Hex));
             click_action(&mut app, Action::Brush(1));
             assert_eq!(app.brush.kind, BrushKind::Soft);
             assert!(app.tool_settings_visible());
+            click_action(&mut app, Action::ColorDisc);
             click_action(&mut app, Action::Swatch(2));
             assert_eq!(app.brush.color, Color::from_hex(PALETTE[2]));
+            press_key(&mut app, 27, false);
             assert!(app.tool_settings_visible());
             assert_eq!(app.tool_popup, Some(ToolPanel::Brush));
 
@@ -3400,7 +3396,6 @@ fn brand_menu_toolbar_history_and_layers_are_reachable_in_a_compact_window() {
         .any(|t| t.text == "Открыть проект…"));
     press_key(&mut app, 27, false);
     press_key(&mut app, 118, false);
-    assert!(app.inspector_layers);
     app.render();
     assert!(app
         .controls
@@ -3455,7 +3450,6 @@ fn image_import_reports_one_summary_preserves_order_and_resets_the_next_batch() 
     assert!(!first.iter().any(|e| matches!(e, Effect::Message { .. })));
     assert_eq!(app.doc.layers.len(), 3);
     assert_eq!(app.doc.active_layer().name, "first");
-    assert!(app.inspector_layers);
     let middle = deliver_io(
         &mut app,
         IoMessage::Imported {
@@ -4980,12 +4974,8 @@ fn transient_quick_preview_handles_exact_input_keyboard_expiry_and_other_gesture
         assert_eq!(app.quick_preview_action(), Some(Action::Size));
         let (x, y, button) = if gesture == 3 {
             app.render();
-            let sv = app
-                .controls
-                .iter()
-                .find(|c| c.action == Action::SV)
-                .unwrap()
-                .hit;
+            click_action(&mut app, Action::ColorDisc);
+            let sv = app.wheel_rect();
             (sv.x + sv.w * 0.5, sv.y + sv.h * 0.5, MouseButton::Left)
         } else {
             (
@@ -5249,7 +5239,8 @@ fn size_previews_are_only_outlines_for_brush_eraser_and_all_shapes() {
     begin_quick_drag(&mut app, Action::Size, 0.5);
     let area = app.quick_preview_rect(Action::Size);
     let (cx, cy) = (area.x + area.w * 0.5, area.y + area.h * 0.5);
-    assert_eq!((cx, cy), (378., 352.));
+    let size = app.quick_control_rect(Action::Size);
+    assert_eq!((cx, cy), (size.x + size.w * 0.5, size.y + size.h + 68.));
     assert!(properties.contains(cx, cy));
     let radius = app.quick_preview_radius(Action::Size);
     let visible = app.render();
@@ -5647,7 +5638,8 @@ fn toolbar_disc_updates_one_text_draft_and_gives_its_caret_back() {
         body: "Линия цвета".into(),
     });
     click_action(&mut app, Action::ColorDisc);
-    assert!(app.color_disc.open && app.tool_settings_visible());
+    assert!(app.color_disc.open && !app.tool_settings_visible());
+    assert!(app.tool_popup_rect().is_none() && !app.quick_controls_visible());
     let p = app.color_popup_rect();
     let r = app.wheel_rect();
     let (cx, cy) = (r.x + r.w / 2., r.y + r.h / 2.);
@@ -5698,7 +5690,6 @@ fn toolbar_disc_updates_one_text_draft_and_gives_its_caret_back() {
 #[test]
 fn color_disc_owns_its_gesture_dismissal_and_keyboard_in_both_themes() {
     let mut app = floating_panel_fixture();
-    app.inspector_layers = true;
     for (dark, scale) in [(true, 1.), (false, 1.5)] {
         app.dark = dark;
         app.resize((884. * scale) as u32, (581. * scale) as u32, scale);
@@ -5707,7 +5698,6 @@ fn color_disc_owns_its_gesture_dismissal_and_keyboard_in_both_themes() {
         let p = app.color_popup_rect();
         let trigger = app.color_trigger();
         assert!(p.y >= 8. && p.y + p.h < trigger.y && p.x >= 0. && p.x + p.w <= app.w());
-        assert!(app.inspector_layers);
         let wheel = app.wheel_rect();
         let (cx, cy) = (wheel.x + wheel.w * 0.5, wheel.y + wheel.h * 0.5);
         let baseline = (app.brush.color, app.color_h, app.color_s, app.color_v);
@@ -5884,6 +5874,8 @@ fn quick_font_search_selects_a_typeface_without_replacing_the_canvas_draft() {
     click_action(&mut app, Action::TextFonts);
     app.event(Event::Text("verdana".into()));
     press_key(&mut app, 27, false);
+    assert!(app.font_picker.open && app.font_picker.query.text().is_empty());
+    press_key(&mut app, 27, false);
     assert!(!app.font_picker.open);
     assert_eq!(app.canvas_editor().unwrap().text, updated.text);
     press_key(&mut app, 13, true);
@@ -5891,7 +5883,7 @@ fn quick_font_search_selects_a_typeface_without_replacing_the_canvas_draft() {
 }
 
 #[test]
-fn quick_font_list_scrolls_with_wheel_thumb_and_keyboard_and_consumes_outside_clicks() {
+fn quick_font_list_scrolls_with_wheel_drag_and_keyboard_and_consumes_outside_clicks() {
     for (dark, scale) in [(true, 1.), (false, 1.5)] {
         let mut app = floating_panel_fixture();
         app.resize((884. * scale) as u32, (581. * scale) as u32, scale);
@@ -5902,11 +5894,24 @@ fn quick_font_list_scrolls_with_wheel_thumb_and_keyboard_and_consumes_outside_cl
         click_action(&mut app, Action::TextFonts);
         app.render();
         let panel = app.font_menu_rect();
-        let track = app.font_scroll_track();
-        assert!(track.h > 0. && app.font_picker.scroll.max() > 0.);
+        let list = app.font_list_rect();
+        let toggle = control_center(&mut app, Action::ToggleFontSearch);
+        assert!(toggle.0 > panel.x + panel.w * 0.8 && toggle.1 > list.y + list.h);
+        assert!(!app.controls.iter().any(|c| c.action == Action::FontQuery));
+        click_action(&mut app, Action::ToggleFontSearch);
+        let input = control_center(&mut app, Action::FontQuery);
+        assert!(input.0 < toggle.0 && input.1 == toggle.1);
+        app.event(Event::Text("nonesuch".into()));
+        assert_eq!(
+            rect_coordinates(app.font_menu_rect()),
+            rect_coordinates(panel)
+        );
+        click_action(&mut app, Action::ToggleFontSearch);
+        assert!(app.font_picker.query.text().is_empty());
+        assert!(list.h > 0. && app.font_picker.scroll.max() > 0.);
         app.event(Event::Wheel {
             x: panel.x + 25.,
-            y: track.y + 12.,
+            y: list.y + 12.,
             delta: -1.,
             modifiers: Modifiers {
                 ctrl: true,
@@ -5914,9 +5919,19 @@ fn quick_font_list_scrolls_with_wheel_thumb_and_keyboard_and_consumes_outside_cl
             },
         });
         assert!(app.font_picker.scroll.offset > 0.);
-        let thumb = app.font_scroll_thumb();
-        left_down(&mut app, thumb.x + 5., thumb.y + 4.);
-        left_up(&mut app, thumb.x + 5., track.y + track.h - 1.);
+        let committed = app.current_text().font.clone();
+        let initial = app.font_picker.scroll.offset;
+        let (x, y) = (list.x + 40., list.y + list.h - 16.);
+        left_down(&mut app, x, y);
+        pointer_move(&mut app, x, y - 35.);
+        assert_eq!(app.font_picker.scroll.offset, initial + 35.);
+        app.event(Event::CaptureLost);
+        left_up(&mut app, x, y - 35.);
+        assert_eq!(app.font_picker.scroll.offset, initial);
+        left_down(&mut app, x, y);
+        left_up(&mut app, x, list.y - 20.);
+        assert!(app.font_picker.open);
+        assert_eq!(app.current_text().font, committed);
         assert_eq!(app.font_picker.scroll.offset, app.font_picker.scroll.max());
         click_action(&mut app, Action::DocumentFont(UiFont::ProggySquare));
         assert_eq!(app.current_text().font, UiFont::ProggySquare.key());
@@ -5969,4 +5984,137 @@ fn separate_brush_and_eraser_dynamics_and_shape_contour_use_their_property_contr
     set_tool_number(&mut app, Action::Spacing, "17");
     assert_eq!(app.tool_settings_section(), 2);
     assert!((app.fill_opacity - 0.32).abs() < 0.001 && (app.brush.spacing - 0.17).abs() < 0.001);
+}
+
+#[test]
+fn pinning_keeps_the_drawn_rect_and_only_flashes_the_outline() {
+    for dark in [true, false] {
+        let mut app = floating_panel_fixture();
+        app.dark = dark;
+        app.set_panel_position(PanelKind::Toolbar, Some((492., 802.)));
+        app.render();
+        click_action(&mut app, Action::ToolPanel(ToolPanel::Shapes));
+        let chooser = app.tool_popup_rect().unwrap();
+        let (x, y) = control_center(&mut app, Action::PinToolPanel);
+        let theme = Theme::with_accent(dark, app.accent);
+        click_action(&mut app, Action::PinToolPanel);
+        assert_eq!(
+            rect_coordinates(app.tool_popup_rect().unwrap()),
+            rect_coordinates(chooser)
+        );
+        let flash = app.render();
+        assert_eq!(frame_pixel(&flash, x, y), theme.text);
+        assert_eq!(
+            frame_pixel(&flash, chooser.x + 50., chooser.y),
+            theme.accent
+        );
+        app.pin_feedback_until = Some(Instant::now() - Duration::from_millis(1));
+        app.event(Event::Tick);
+        let settled = app.render();
+        assert!(app.tool_panel_pinned);
+        assert_eq!(frame_pixel(&settled, x, y), theme.text);
+        assert_eq!(
+            frame_pixel(&settled, chooser.x + 50., chooser.y),
+            theme.surface
+        );
+
+        // Re-pinning starts from the new dropdown, even after a previous free placement.
+        left_down(&mut app, x, y);
+        left_up(&mut app, x - 80., y - 40.);
+        click_action(&mut app, Action::PinToolPanel);
+        app.set_panel_position(PanelKind::Toolbar, Some((32., 96.)));
+        app.render();
+        let next = app.tool_popup_rect().unwrap();
+        click_action(&mut app, Action::PinToolPanel);
+        assert_eq!(
+            rect_coordinates(app.tool_popup_rect().unwrap()),
+            rect_coordinates(next)
+        );
+    }
+}
+
+#[test]
+fn color_wheel_restores_filtered_presets_quick_controls_and_moved_properties() {
+    for pinned in [false, true] {
+        let mut app = floating_panel_fixture();
+        click_action(&mut app, Action::ToolPanel(ToolPanel::Brush));
+        if pinned {
+            click_action(&mut app, Action::PinToolPanel);
+        }
+        browser_query(&mut app, "ink");
+        click_action(&mut app, Action::ToolProperties);
+        click_action(&mut app, Action::ToolSection(1));
+        let (x, y) = control_center(&mut app, Action::MoveToolProperties);
+        left_down(&mut app, x, y);
+        left_up(&mut app, x + 100., y + 32.);
+        let properties = app.tool_settings_rect();
+        let chooser = app.tool_popup_rect().unwrap();
+        let quick = app.quick_controls_rect();
+        let history = Color::from_hex(0x246880);
+        app.update_color(history);
+        app.remember();
+        app.update_color(Color::BLACK);
+        let before = app.render();
+        assert!(before.texts.iter().any(|r| r.text == "Образец"));
+        assert!(!app.controls.iter().any(|c| matches!(
+            c.action,
+            Action::Hex | Action::Swatch(_) | Action::Recent(_)
+        )));
+        click_action(&mut app, Action::ColorDisc);
+        let wheel = app.render();
+        assert!(!app.tool_settings_visible() && !app.quick_controls_visible());
+        assert!(app.tool_popup_rect().is_none());
+        assert!(!wheel
+            .texts
+            .iter()
+            .any(|r| r.text == "Образец" || r.text == "ink"));
+        assert!(wheel.texts.iter().any(|r| r.text.starts_with("СЛОИ")));
+        click_action(&mut app, Action::Recent(0));
+        assert_eq!(app.brush.color, history);
+        press_key(&mut app, 27, false);
+        let restored = app.render();
+        assert!(restored.texts.iter().any(|r| r.text == "Образец"));
+        assert_eq!(
+            rect_coordinates(app.tool_settings_rect()),
+            rect_coordinates(properties)
+        );
+        assert_eq!(
+            rect_coordinates(app.tool_popup_rect().unwrap()),
+            rect_coordinates(chooser)
+        );
+        assert_eq!(
+            rect_coordinates(app.quick_controls_rect()),
+            rect_coordinates(quick)
+        );
+        assert_eq!(app.browser.view(ToolPanel::Brush).query.text(), "ink");
+        assert_eq!(app.tool_settings_section(), 1);
+        assert_eq!(app.tool_panel_pinned, pinned);
+    }
+}
+
+#[test]
+fn tool_properties_keep_their_position_on_reopen_and_support_keyboard_reset() {
+    let mut app = floating_panel_fixture();
+    press_key(&mut app, 115, false);
+    let original = app.tool_settings_rect();
+    let (x, y) = control_center(&mut app, Action::MoveToolProperties);
+    left_down(&mut app, x, y);
+    left_up(&mut app, x + 160., y + 55.);
+    app.render();
+    assert_eq!(focused_action(&app), Some(Action::MoveToolProperties));
+    press_key(&mut app, 39, false);
+    let moved = app.tool_settings_rect();
+    assert_eq!((moved.x, moved.y), (original.x + 168., original.y + 55.));
+    press_key(&mut app, 115, false);
+    press_key(&mut app, 115, false);
+    assert_eq!(
+        rect_coordinates(app.tool_settings_rect()),
+        rect_coordinates(moved)
+    );
+    click_action(&mut app, Action::MoveToolProperties);
+    press_key(&mut app, 36, false);
+    assert_eq!(
+        rect_coordinates(app.tool_settings_rect()),
+        rect_coordinates(original)
+    );
 }

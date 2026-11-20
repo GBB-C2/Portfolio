@@ -1,6 +1,7 @@
 //! Toolbar color popup. Painting and pointer input share the same HSV geometry.
 use super::*;
 
+const POPUP_HEIGHT: f32 = 332.;
 const RING_INNER: f32 = 0.83;
 const FIELD_RADIUS: f32 = 0.76;
 
@@ -79,8 +80,8 @@ impl PortfolioApp {
         let below = trigger.y + trigger.h + 12.;
         let space_below = self.h() - 8. - below;
         let space_above = trigger.y - 20.;
-        let opens_down = space_below >= 304. || space_below >= space_above;
-        let height = (if opens_down { space_below } else { space_above }).clamp(1., 304.);
+        let opens_down = space_below >= POPUP_HEIGHT || space_below >= space_above;
+        let height = (if opens_down { space_below } else { space_above }).clamp(1., POPUP_HEIGHT);
         let y = if opens_down {
             below
         } else {
@@ -91,7 +92,7 @@ impl PortfolioApp {
 
     pub(super) fn wheel_rect(&self) -> Rect {
         let panel = self.color_popup_rect();
-        let size = (panel.w - 32.).min(panel.h - 82.).max(1.);
+        let size = (panel.w - 32.).min(panel.h - 110.).max(1.);
         Rect::new(panel.x + (panel.w - size) / 2., panel.y + 44., size, size)
     }
 
@@ -111,7 +112,7 @@ impl PortfolioApp {
         p.clip = panel.inset(1.);
         self.hit_clip = Some(p.clip);
         p.text(
-            Rect::new(panel.x + 16., panel.y + 8., 110., 28.),
+            Rect::new(panel.x + 16., panel.y + 8., panel.w - 178., 28.),
             "Цвет",
             16.,
             t.text,
@@ -121,6 +122,13 @@ impl PortfolioApp {
         );
         let ink = self.brush.color;
         let chip = Rect::new(panel.x + panel.w - 122., panel.y + 8., 106., 28.);
+        self.slider_reset_button(
+            p,
+            Rect::new(chip.x - 32., chip.y + 2., 24., 24.),
+            Slider::Hue,
+            "Оттенок",
+            true,
+        );
         let size = (wheel.w * self.scale).round().clamp(1., 1024.) as u32;
         let pixels = self.color_disc.pixels(size, self.color_h);
         p.image(wheel, size, size, pixels, false, 1.);
@@ -178,7 +186,7 @@ impl PortfolioApp {
         for (i, &raw) in PALETTE.iter().enumerate() {
             let rect = Rect::new(
                 panel.x + 16. + i as f32 * (width + 4.),
-                panel.y + panel.h - 32.,
+                panel.y + panel.h - 60.,
                 width,
                 22.,
             );
@@ -199,6 +207,30 @@ impl PortfolioApp {
                 );
             }
             self.control(rect, Action::Swatch(i), format!("Цвет #{raw:06X}"), true);
+        }
+        let recent_y = panel.y + panel.h - 30.;
+        p.text(
+            Rect::new(panel.x + 16., recent_y, 76., 20.),
+            "НЕДАВНИЕ",
+            10.,
+            t.muted,
+            false,
+            false,
+            TextAlign::Left,
+        );
+        let step = (panel.w - 106.) / 8.;
+        for i in 0..8 {
+            let r = Rect::new(panel.x + 90. + i as f32 * step, recent_y, step - 3., 20.);
+            if let Some(color) = self.recent.get(i).copied() {
+                let action = Action::Recent(i);
+                let focused =
+                    self.focus == Some(self.controls.len()) || self.pending_focus == Some(action);
+                p.rounded(r, 3., if focused { t.accent } else { t.border });
+                p.rounded(r.inset(if focused { 2. } else { 1. }), 2., rgb(color));
+                self.control(r, action, format!("Недавний {}", hex(color)), true);
+            } else {
+                p.rounded(r, 3., t.raised);
+            }
         }
         self.hit_clip = None;
         p.clip = Rect::new(0., 0., self.w(), self.h());
@@ -253,7 +285,13 @@ impl PortfolioApp {
             .find(|c| c.enabled && c.hit.contains(x, y))
             .map(|c| c.action)
         {
-            if matches!(action, Action::Hex | Action::Swatch(_)) {
+            if matches!(
+                action,
+                Action::Hex
+                    | Action::Swatch(_)
+                    | Action::Recent(_)
+                    | Action::ResetSlider(Slider::Hue)
+            ) {
                 self.activate(action, out);
                 self.pending_focus = Some(action);
             }
@@ -291,11 +329,6 @@ impl PortfolioApp {
                 (self.color_s, self.color_v) =
                     field_value((2. * nx - 1.) / FIELD_RADIUS, (2. * ny - 1.) / FIELD_RADIUS);
             }
-            Action::SV => {
-                self.color_s = nx.clamp(0., 1.);
-                self.color_v = (1. - ny).clamp(0., 1.);
-            }
-            Action::Hue => self.color_h = (nx.clamp(0., 1.) * 360.).rem_euclid(360.),
             _ => return,
         }
         self.apply_hsv();
@@ -324,6 +357,8 @@ impl PortfolioApp {
         if matches!(code, 9 | 117) {
             let mut choices = vec![Action::DiscHue, Action::DiscSV, Action::Hex];
             choices.extend((0..PALETTE.len()).map(Action::Swatch));
+            choices.extend((0..self.recent.len()).map(Action::Recent));
+            choices.push(Action::ResetSlider(Slider::Hue));
             let index = choices.iter().position(|&a| a == current).unwrap_or(0);
             let next = if m.shift {
                 index + choices.len() - 1
@@ -345,7 +380,13 @@ impl PortfolioApp {
             }
             self.apply_hsv();
         } else if matches!(code, 13 | 32) {
-            if matches!(current, Action::Hex | Action::Swatch(_)) {
+            if matches!(
+                current,
+                Action::Hex
+                    | Action::Swatch(_)
+                    | Action::Recent(_)
+                    | Action::ResetSlider(Slider::Hue)
+            ) {
                 self.activate(current, out);
                 self.pending_focus = Some(current);
             } else {

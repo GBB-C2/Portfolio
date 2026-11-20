@@ -345,6 +345,7 @@ impl PortfolioApp {
         if stage.contains(self.pointer.0, self.pointer.1)
             && c.contains(self.pointer.0, self.pointer.1)
             && self.editor_interactive()
+            && !self.tool_popover_open()
             && (self.tool == Tool::Text
                 || self.tool_popup.is_none()
                 || self.tool_panel_pinned
@@ -444,10 +445,12 @@ impl PortfolioApp {
             self.begin_reveal(p, self.right_panel_rect(), 0);
             self.draw_panel(p);
             self.end_reveal(p);
-            // Keep the grip accessible if a pinned quick row is dragged over the toolbar.
+            // Keep the toolbar reachable when floating rows overlap it.
             let quick = self.quick_controls_visible();
+            let bar = self.top_tools_rect();
+            let above_chooser = self.toolbar_grip_over_chooser();
             let toolbar_on_top =
-                quick && self.top_tools_rect().intersects(self.quick_controls_rect());
+                above_chooser || (quick && bar.intersects(self.quick_controls_rect()));
             if !toolbar_on_top {
                 self.draw_toolbar_surface(p);
             }
@@ -456,15 +459,20 @@ impl PortfolioApp {
                 self.draw_quick_controls(p);
                 self.end_reveal(p);
             }
+            if !hidden && above_chooser {
+                self.draw_popup_layer(p);
+            }
             if toolbar_on_top {
                 self.draw_toolbar_surface(p);
+            }
+            if !hidden && !above_chooser {
+                self.draw_popup_layer(p);
             }
             self.focused_mode = hidden;
             if hidden {
                 self.controls.retain(|c| c.rect.y < 64.);
             }
         }
-        self.draw_popup_layer(p);
         let label = if self.busy {
             self.status.clone()
         } else if let Some(i) = self.hover {
@@ -484,7 +492,9 @@ impl PortfolioApp {
             )
         };
         p.label(299., 39., titlew, label, 10., t.muted);
-        if self.overlay != Overlay::None {
+        if self.overlay != Overlay::None
+            && !(self.overlay == Overlay::ToolProperties && self.color_disc.open)
+        {
             if let Some((focus, hover, pending_focus)) = overlay_input {
                 self.focus = focus;
                 self.hover = hover;
@@ -858,6 +868,10 @@ impl PortfolioApp {
         } else {
             self.dropdown_surface(p, r, anchor.x + anchor.w / 2., "Выбор инструмента");
         }
+        if self.pin_feedback_visible() {
+            p.rounded(r, 4., t.accent);
+            p.rounded(r.inset(1.), 3., t.surface);
+        }
         p.clip = r.inset(1.);
         self.hit_clip = Some(p.clip);
         self.icon_button(
@@ -870,7 +884,7 @@ impl PortfolioApp {
             } else {
                 "Закрепить панель"
             },
-            self.tool_panel_pinned,
+            false,
             true,
         );
         self.icon_button(
@@ -1190,156 +1204,11 @@ impl PortfolioApp {
         let x = panel.x;
         let sx = x + 20.;
         let sw = 248.;
-        self.floating_surface(p, panel, "Цвет и слои");
-        self.button(
-            p,
-            Rect::new(x + 12., panel.y + 10., 128., 30.),
-            Action::Inspector(false),
-            "Цвет",
-            None,
-            !self.inspector_layers,
-            true,
-            false,
-        );
-        self.button(
-            p,
-            Rect::new(x + 148., panel.y + 10., 128., 30.),
-            Action::Inspector(true),
-            "Слои",
-            None,
-            self.inspector_layers,
-            true,
-            false,
-        );
-        let off = if self.inspector_layers {
-            0.
-        } else {
-            self.panel_scroll.clamp(0., (782. - h).max(0.))
-        };
-        let offset = if self.inspector_layers { 393. } else { 149. };
-        let yy = |v: f32| v - offset - off;
+        self.floating_surface(p, panel, "Слои");
         p.clip = Rect::new(x + 1., panel.y + 1., panel.w - 2., (h - 207.).max(0.));
         self.hit_clip = Some(p.clip);
-        if !self.inspector_layers {
-            p.text(
-                Rect::new(sx, yy(351.), 90., 24.),
-                "ЦВЕТ",
-                10.,
-                t.muted,
-                true,
-                false,
-                TextAlign::Left,
-            );
-            p.rounded(Rect::new(sx + 108., yy(348.), 140., 28.), 4., t.raised);
-            p.rounded(
-                Rect::new(sx + 114., yy(354.), 16., 16.),
-                4.,
-                rgb(self.brush.color),
-            );
-            p.text(
-                Rect::new(sx + 140., yy(348.), 102., 28.),
-                hex(self.brush.color),
-                12.,
-                t.text,
-                false,
-                false,
-                TextAlign::Left,
-            );
-            self.control(
-                Rect::new(sx + 108., yy(348.), 140., 28.),
-                Action::Hex,
-                "HEX · точный цвет",
-                true,
-            );
-            let sv = Rect::new(sx, yy(388.), sw, 84.);
-            let stepsx = (sv.w * self.scale) as u32;
-            let stepsy = (sv.h * self.scale) as u32;
-            for py in 0..stepsy {
-                for px in 0..stepsx {
-                    let c = hsv(
-                        self.color_h,
-                        px as f32 / stepsx.max(1) as f32,
-                        1. - py as f32 / stepsy.max(1) as f32,
-                    );
-                    p.pixel(
-                        (sv.x * self.scale) as i32 + px as i32,
-                        (sv.y * self.scale) as i32 + py as i32,
-                        rgb(c),
-                        1.,
-                    );
-                }
-            }
-            p.circle(
-                sv.x + self.color_s * sv.w,
-                sv.y + (1. - self.color_v) * sv.h,
-                5.,
-                0x141414,
-                false,
-            );
-            p.circle(
-                sv.x + self.color_s * sv.w,
-                sv.y + (1. - self.color_v) * sv.h,
-                3.5,
-                0xffffff,
-                false,
-            );
-            self.control(
-                sv,
-                Action::SV,
-                "Цвет: стрелки меняют насыщенность и яркость",
-                true,
-            );
-            let hue = Rect::new(sx, yy(485.), sw - 34., 10.);
-            for i in 0..hue.w as i32 {
-                p.rect(
-                    Rect::new(sx + i as f32, hue.y, 1., 10.),
-                    rgb(hsv(i as f32 / hue.w * 360., 1., 1.)),
-                );
-            }
-            let hx = sx + self.color_h / 360. * hue.w;
-            p.rounded(Rect::new(hx - 3., hue.y - 3., 6., 16.), 3., 0xf6f6f6);
-            p.rounded(
-                Rect::new(hx - 1., hue.y - 1., 2., 12.),
-                1.,
-                rgb(hsv(self.color_h, 1., 1.)),
-            );
-            self.control(
-                Rect::new(hue.x, hue.y - 4., hue.w, hue.h + 8.),
-                Action::Hue,
-                "Оттенок: стрелки меняют значение",
-                true,
-            );
-            self.slider_reset_button(
-                p,
-                Rect::new(sx + sw - 24., hue.y - 7., 24., 24.),
-                Slider::Hue,
-                "Оттенок",
-                true,
-            );
-            for (i, c) in PALETTE.iter().enumerate() {
-                let r = Rect::new(sx + i as f32 * 32., yy(510.), 24., 24.);
-                p.rounded(r, 4., *c);
-                if rgb(self.brush.color) == *c {
-                    p.rounded(r.inset(-2.), 4., t.text);
-                    p.rounded(r.inset(-0.5), 4., *c);
-                }
-                self.control(r, Action::Swatch(i), format!("Цвет #{c:06X}"), true);
-            }
-            p.label(sx, yy(546.), 90., "НЕДАВНИЕ", 9., t.muted);
-            for i in 0..8 {
-                let r = Rect::new(sx + 88. + i as f32 * 20., yy(547.), 14., 14.);
-                if let Some(c) = self.recent.get(i) {
-                    let c = *c;
-                    p.rounded(r, 3., rgb(c));
-                    self.control(r, Action::Recent(i), format!("Недавний {}", hex(c)), true);
-                } else {
-                    p.rounded(r, 3., t.raised);
-                }
-            }
-            p.rect(Rect::new(sx, yy(579.), sw, 1.), t.border);
-        }
         p.text(
-            Rect::new(sx, yy(585.), 155., 30.),
+            Rect::new(sx, panel.y + 12., sw - 40., 30.),
             format!("СЛОИ  /  {:02}", self.doc.layers.len()),
             10.,
             t.muted,
@@ -1349,7 +1218,7 @@ impl PortfolioApp {
         );
         self.icon_button(
             p,
-            Rect::new(sx + 216., yy(584.), 32., 28.),
+            Rect::new(sx + 216., panel.y + 12., 32., 28.),
             Action::AddLayer,
             "plus",
             "Добавить слой · Ctrl+Shift+N",
@@ -1359,7 +1228,7 @@ impl PortfolioApp {
         let opacity = self.doc.layers[self.doc.active].opacity as f32 / 255.;
         self.slider(
             p,
-            Rect::new(sx, yy(615.), sw, 42.),
+            Rect::new(sx, panel.y + 48., sw, 42.),
             Action::LayerOpacity,
             opacity,
             1.,
@@ -1367,9 +1236,9 @@ impl PortfolioApp {
             format!("{:.0}%", opacity * 100.),
             true,
         );
-        let row_top = yy(662.);
+        let row_top = self.layer_rows_top();
         let row_bottom = (h - 62.).max(row_top + 40.);
-        let count = (((row_bottom - row_top - 40.) / 44.).floor() + 1.).max(1.) as usize;
+        let count = self.visible_layer_count();
         self.layer_scroll = self
             .layer_scroll
             .min(self.doc.layers.len().saturating_sub(count));
@@ -1455,22 +1324,6 @@ impl PortfolioApp {
                     row_top + trackh * self.layer_scroll as f32 / self.doc.layers.len() as f32,
                     3.,
                     (trackh * count as f32 / self.doc.layers.len() as f32).max(10.),
-                ),
-                1.,
-                t.muted,
-            );
-        }
-        if !self.inspector_layers && h < 782. {
-            let track = Rect::new(x + 283., panel.y + 8., 2., (h - panel.y - 78.).max(20.));
-            let maximum = 782. - h;
-            let thumb = (track.h * track.h / (track.h + maximum)).max(24.);
-            p.rounded(track, 1., t.raised);
-            p.rounded(
-                Rect::new(
-                    track.x,
-                    track.y + (track.h - thumb) * off / maximum,
-                    2.,
-                    thumb,
                 ),
                 1.,
                 t.muted,
@@ -1752,13 +1605,13 @@ enum Action {
     TextSize,
     TextEffect(EffectParam),
     SetAnimations(bool),
-    Inspector(bool),
+    ShowLayers,
     ColorDisc,
     TextFonts,
     FontQuery,
     ClearFontQuery,
     DocumentFont(UiFont),
-    FontListScroll,
+    ToggleFontSearch,
     DiscHue,
     DiscSV,
     BrowserSearch,
@@ -1767,6 +1620,7 @@ enum Action {
     BrowserCategory(Category),
     ToolSection(u8),
     MoveToolbar,
+    MoveToolProperties,
     ResetPanelLayout,
     #[allow(dead_code)] // Programmatic jump to the vertical stamp section.
     BrushDetail(bool),
@@ -1806,8 +1660,6 @@ enum Action {
     Size,
     Opacity,
     Hex,
-    SV,
-    Hue,
     Swatch(usize),
     Recent(usize),
     AddLayer,
@@ -1878,7 +1730,7 @@ impl Slider {
             Self::TextSize => Action::TextSize,
             Self::TextEffect(param) => Action::TextEffect(param),
             Self::LayerOpacity => Action::LayerOpacity,
-            Self::Hue => Action::Hue,
+            Self::Hue => Action::DiscHue,
         }
     }
     fn for_action(action: Action) -> Option<Self> {
@@ -1983,8 +1835,12 @@ enum BrowserRow {
     Categories,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ScrollList {
+    Presets(ToolPanel, BrowserRow),
+    Fonts,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ScrollSurface {
-    DocumentFonts,
     Settings,
     ToolProperties,
 }
@@ -1992,6 +1848,7 @@ enum ScrollSurface {
 enum PanelKind {
     Toolbar,
     Chooser,
+    Properties,
 }
 #[derive(Clone, Copy)]
 enum Drag {
@@ -2017,9 +1874,8 @@ enum Drag {
         ex: f32,
         ey: f32,
     },
-    Browser {
-        family: ToolPanel,
-        row: BrowserRow,
+    List {
+        list: ScrollList,
         start_x: f32,
         start_y: f32,
         initial: f32,
@@ -2107,7 +1963,6 @@ pub struct PortfolioApp {
     tool_properties_ui: ToolPropertiesUi,
     settings_choice: Option<SettingsChoice>,
     choice_index: usize,
-    inspector_layers: bool,
     browser: Browser,
     browser_search_focus: bool,
     presets: Presets,
@@ -2130,6 +1985,8 @@ pub struct PortfolioApp {
     text_renderer: fn(&TextLayer, u32, u32, Language) -> Result<Vec<Color>, String>,
     tool_popup: Option<ToolPanel>,
     tool_panel_pinned: bool,
+    pin_feedback_until: Option<Instant>,
+    pinned_quick_above: bool,
     toolbar_position: Option<(f32, f32)>,
     chooser_position: Option<(f32, f32)>,
     tool_row_relayout_guard: Option<Rect>,
@@ -2166,7 +2023,6 @@ pub struct PortfolioApp {
     menu_index: usize,
     drag: Drag,
     layer_scroll: usize,
-    panel_scroll: f32,
     status: String,
     status_until: Instant,
     path: Option<PathBuf>,
@@ -2264,6 +2120,7 @@ impl PortfolioApp {
                     | Action::ToolPropertiesScroll
                     | Action::ToolSection(_)
                     | Action::MoveToolbar
+                    | Action::MoveToolProperties
                     | Action::ResetPanelLayout
                     | Action::FontMenu
                     | Action::LanguageMenu
@@ -2275,7 +2132,7 @@ impl PortfolioApp {
                     | Action::SetAnimations(_)
                     | Action::FontSize
                     | Action::ResetSlider(Slider::FontSize)
-                    | Action::Inspector(_)
+                    | Action::ShowLayers
                     | Action::ResetAppearance
                     | Action::Help
                     | Action::Focus
@@ -2323,6 +2180,7 @@ impl PortfolioApp {
                     | Action::CloseToolProperties
                     | Action::ToolSection(_)
                     | Action::MoveToolbar
+                    | Action::MoveToolProperties
                     | Action::ResetPanelLayout
                     | Action::PinToolPanel
                     | Action::Shape(_)
@@ -2343,7 +2201,7 @@ impl PortfolioApp {
             | Action::DiscSV
             | Action::FontQuery
             | Action::ClearFontQuery
-            | Action::FontListScroll => {}
+            | Action::ToggleFontSearch => {}
             Action::TextFonts => self.open_text_fonts(),
             Action::DocumentFont(font) => {
                 self.current_text_mut().font = font.key().into();
@@ -2452,10 +2310,8 @@ impl PortfolioApp {
                     self.pending_focus = Some(a);
                 }
             }
-            Action::Inspector(layers) => {
-                self.inspector_layers = layers;
+            Action::ShowLayers => {
                 self.focused_mode = false;
-                self.panel_scroll = 0.;
                 self.layer_scroll = 0;
                 self.controls.clear();
             }
@@ -2490,9 +2346,9 @@ impl PortfolioApp {
                     self.pending_focus = Some(Action::ToolSection(section));
                 }
             }
-            Action::MoveToolbar => {
-                self.pending_properties_focus = false;
-                self.pending_focus = Some(Action::MoveToolbar);
+            Action::MoveToolbar | Action::MoveToolProperties => {
+                self.pending_properties_focus = a == Action::MoveToolProperties;
+                self.pending_focus = Some(a);
                 self.feedback("Переместить панель · стрелки / Home");
             }
             Action::ResetPanelLayout => {
@@ -2649,7 +2505,14 @@ impl PortfolioApp {
             Action::CloseToolProperties => self.close_tool_settings(),
             Action::PinToolPanel => {
                 self.tool_row_relayout_guard = self.current_tool_row_rect();
+                if !self.tool_panel_pinned {
+                    if let Some(chooser) = self.tool_popup_rect() {
+                        self.chooser_position = Some((chooser.x, chooser.y));
+                        self.pinned_quick_above = chooser.y < self.top_tools_rect().y;
+                    }
+                }
                 self.tool_panel_pinned = !self.tool_panel_pinned;
+                self.pin_feedback_until = Some(Instant::now() + Duration::from_millis(450));
                 self.closing_popup = None;
                 self.popup_motion.snap(true);
                 self.quick_preview = None;
@@ -2671,9 +2534,6 @@ impl PortfolioApp {
                 self.switch_tool(tool);
                 if tool == Tool::Text {
                     self.feedback("Щёлкните по холсту для надписи или по буквам для правки.");
-                }
-                if !was_open {
-                    self.panel_scroll = 0.;
                 }
                 self.tool_popup = if was_open { None } else { Some(family) };
                 self.controls.clear();
@@ -2761,8 +2621,6 @@ impl PortfolioApp {
                 "Шесть символов HEX, например #365AD7",
                 hex(self.brush.color),
             )),
-            Action::SV => self.feedback("Стрелки: насыщенность и яркость. HEX — точный цвет."),
-            Action::Hue => self.feedback("Стрелки: оттенок. HEX — точный цвет."),
             Action::Swatch(i) => {
                 if let Some(c) = PALETTE.get(i) {
                     self.update_color(Color::from_hex(*c));
@@ -3024,13 +2882,8 @@ impl PortfolioApp {
             Drag::Shape { .. } => {
                 self.doc.cancel_shape_preview();
             }
-            Drag::Browser {
-                family,
-                row,
-                initial,
-                ..
-            } => {
-                self.browser_scroll_mut(family, row).set(initial);
+            Drag::List { list, initial, .. } => {
+                self.list_scroll_mut(list).set(initial);
                 self.controls.clear();
                 self.hover = None;
             }
@@ -3111,9 +2964,8 @@ impl PortfolioApp {
                 // Rasterize the newest geometry once per frame, rather than
                 // blocking on every queued high-frequency pointer event.
             }
-            Drag::Browser {
-                family,
-                row,
+            Drag::List {
+                list,
                 start_x,
                 start_y,
                 initial,
@@ -3122,15 +2974,17 @@ impl PortfolioApp {
             } => {
                 let moved = moved || (x - start_x).hypot(y - start_y) > 5.;
                 if moved {
-                    self.browser_scroll_mut(family, row)
-                        .set(initial + start_x - x);
+                    let distance = match list {
+                        ScrollList::Fonts => start_y - y,
+                        ScrollList::Presets(..) => start_x - x,
+                    };
+                    self.list_scroll_mut(list).set(initial + distance);
                     self.controls.clear();
                     self.hover = None;
                     self.focus = None;
                 }
-                self.drag = Drag::Browser {
-                    family,
-                    row,
+                self.drag = Drag::List {
+                    list,
                     start_x,
                     start_y,
                     initial,
@@ -3239,7 +3093,7 @@ impl PortfolioApp {
         if matches!(
             self.drag,
             Drag::Slider { .. }
-                | Drag::Browser { .. }
+                | Drag::List { .. }
                 | Drag::VerticalScroll { .. }
                 | Drag::Panel { .. }
         ) && button != MouseButton::Left
@@ -3336,7 +3190,9 @@ impl PortfolioApp {
             } else {
                 None
             };
-            if visible.contains(x, y) {
+            if visible.contains(x, y)
+                && !(self.toolbar_grip_over_chooser() && self.top_tools_rect().contains(x, y))
+            {
                 if let Some(row) = row {
                     if button == MouseButton::Left {
                         self.prepare_browser_layout(family);
@@ -3355,16 +3211,7 @@ impl PortfolioApp {
                                 _ => None,
                             }
                         });
-                        let initial = self.browser_scroll_mut(family, row).offset;
-                        self.drag = Drag::Browser {
-                            family,
-                            row,
-                            start_x: x,
-                            start_y: y,
-                            initial,
-                            moved: false,
-                            pending,
-                        };
+                        self.begin_list_drag(ScrollList::Presets(family, row), x, y, pending);
                     }
                     return;
                 }
@@ -3390,6 +3237,7 @@ impl PortfolioApp {
             }
             let movable = match c.action {
                 Action::MoveToolbar => Some(PanelKind::Toolbar),
+                Action::MoveToolProperties => Some(PanelKind::Properties),
                 Action::PinToolPanel if self.tool_panel_pinned => Some(PanelKind::Chooser),
                 _ => None,
             };
@@ -3449,9 +3297,6 @@ impl PortfolioApp {
                         initial,
                     };
                     self.update_drag(x, y, modifiers);
-                }
-                Action::SV | Action::Hue => {
-                    self.begin_color_drag(c.action, c.rect, x, y, modifiers)
                 }
                 _ => self.activate(c.action, out),
             }
@@ -3725,7 +3570,7 @@ impl PortfolioApp {
             return;
         }
         if code == 118 && !repeat && !m.ctrl {
-            self.activate(Action::Inspector(true), out);
+            self.activate(Action::ShowLayers, out);
             return;
         }
         if code == 117
@@ -3899,18 +3744,6 @@ impl PortfolioApp {
                                 self.changed();
                             }
                         }
-                        Action::Hue => {
-                            self.color_h = (self.color_h + d * k).rem_euclid(360.);
-                            self.apply_hsv();
-                        }
-                        Action::SV => {
-                            if code == 37 || code == 39 {
-                                self.color_s = (self.color_s + d * k / 100.).clamp(0., 1.);
-                            } else {
-                                self.color_v = (self.color_v + d * k / 100.).clamp(0., 1.);
-                            }
-                            self.apply_hsv();
-                        }
                         _ => {}
                     }
                     return;
@@ -4031,13 +3864,17 @@ impl NativeApp for PortfolioApp {
         self.font_size as f32 / 13.
     }
     fn needs_frequent_ticks(&self) -> bool {
-        self.io.is_some() || self.auto_io.is_some() || self.quick_preview.is_some()
+        self.io.is_some()
+            || self.auto_io.is_some()
+            || self.quick_preview.is_some()
+            || self.pin_feedback_until.is_some()
     }
     fn wants_animation(&self) -> bool {
         self.motion_enabled()
             && (self.chrome_motion.active()
                 || self.popup_motion.active()
                 || self.browser_search_motion.active()
+                || self.font_picker.search_animating()
                 || self.overlay_motion.active()
                 || self.choice_motion.active())
     }
@@ -4190,30 +4027,33 @@ impl NativeApp for PortfolioApp {
                     self.drag,
                     Drag::Slider { .. }
                         | Drag::Color { .. }
-                        | Drag::Browser { .. }
+                        | Drag::List { .. }
                         | Drag::VerticalScroll { .. }
                         | Drag::Panel { .. }
                 ) || button == MouseButton::Left
                 {
                     self.update_drag(x, y, modifiers);
-                    let selected = if let Drag::Browser {
-                        family,
-                        row,
+                    let selected = if let Drag::List {
+                        list,
                         moved: false,
                         pending,
                         ..
                     } = self.drag
                     {
-                        let viewport = match row {
-                            BrowserRow::Items => self.browser_items_rect(family),
-                            BrowserRow::Categories => self.browser_categories_rect(family),
-                        };
-                        pending.filter(|a| {
-                            viewport.contains(x, y)
-                                && self
-                                    .controls
-                                    .iter()
-                                    .any(|c| c.enabled && c.action == *a && c.hit.contains(x, y))
+                        pending.filter(|&action| match list {
+                            ScrollList::Fonts => {
+                                self.font_at(x, y).map(Action::DocumentFont) == Some(action)
+                            }
+                            ScrollList::Presets(family, row) => {
+                                let viewport = match row {
+                                    BrowserRow::Items => self.browser_items_rect(family),
+                                    BrowserRow::Categories => self.browser_categories_rect(family),
+                                };
+                                viewport.contains(x, y)
+                                    && self.controls.iter().any(|c| {
+                                        c.enabled && c.action == action && c.hit.contains(x, y)
+                                    })
+                            }
                         })
                     } else if matches!(
                         self.drag,
@@ -4228,16 +4068,18 @@ impl NativeApp for PortfolioApp {
                                 .contains(x, y)
                                 .then_some(Action::PinToolPanel)
                         })
-                    } else if matches!(
-                        self.drag,
-                        Drag::Panel {
-                            kind: PanelKind::Toolbar,
-                            ..
-                        }
-                    ) {
-                        Some(Action::MoveToolbar)
                     } else {
-                        None
+                        match self.drag {
+                            Drag::Panel {
+                                kind: PanelKind::Toolbar,
+                                ..
+                            } => Some(Action::MoveToolbar),
+                            Drag::Panel {
+                                kind: PanelKind::Properties,
+                                ..
+                            } => Some(Action::MoveToolProperties),
+                            _ => None,
+                        }
                     };
                     self.finish_drag();
                     if let Some(action) = selected {
@@ -4282,7 +4124,10 @@ impl NativeApp for PortfolioApp {
                 {
                     self.tool_settings_scroll_by(-delta * 44.);
                 } else if matches!(self.drag, Drag::None) && self.editor_interactive() {
-                    if self.tool_popup_contains(x, y) {
+                    if self.tool_popup_contains(x, y)
+                        && !(self.toolbar_grip_over_chooser()
+                            && self.top_tools_rect().contains(x, y))
+                    {
                         // Each strip owns its wheel input, including Ctrl+wheel.
                         // Neither padding nor a clamped edge may zoom the canvas.
                         if let Some(family) = self.tool_popup {
@@ -4300,34 +4145,15 @@ impl NativeApp for PortfolioApp {
                         // Movable rows remain above the inspector and own the
                         // wheel as well as pointer clicks in their visible area.
                     } else if self.panel() && self.right_panel_rect().contains(x, y) {
-                        let maximum = if self.inspector_layers {
-                            0.
-                        } else {
-                            (782. - self.h()).max(0.)
-                        };
-                        let off = self.panel_scroll.clamp(0., maximum);
-                        let previous_layer = self.layer_scroll;
-                        let row_top = if self.inspector_layers {
-                            269.
-                        } else {
-                            513. - off
-                        };
-                        if y >= row_top {
-                            let count = (((self.h() - 62. - row_top - 40.) / 44.).floor() + 1.)
-                                .max(1.) as usize;
+                        let row_top = self.layer_rows_top();
+                        if y >= row_top && delta != 0. {
+                            let count = self.visible_layer_count();
                             if delta < 0. {
                                 self.layer_scroll = (self.layer_scroll + 1)
                                     .min(self.doc.layers.len().saturating_sub(count));
                             } else {
                                 self.layer_scroll = self.layer_scroll.saturating_sub(1);
                             }
-                        }
-                        if !self.inspector_layers
-                            && (y < row_top || previous_layer == self.layer_scroll)
-                        {
-                            self.panel_scroll = (off - delta * 48.).clamp(0., maximum);
-                            self.focus = None;
-                            self.hover = None;
                         }
                     } else if self.stage().contains(x, y) && !self.canvas_obscured(x, y) {
                         if modifiers.ctrl {
@@ -4542,7 +4368,6 @@ impl PortfolioApp {
             tool_properties_ui: ToolPropertiesUi::default(),
             settings_choice: None,
             choice_index: 0,
-            inspector_layers: false,
             browser: Browser::default(),
             browser_search_focus: false,
             presets,
@@ -4573,6 +4398,8 @@ impl PortfolioApp {
             brush,
             tool_popup: None,
             tool_panel_pinned: false,
+            pin_feedback_until: None,
+            pinned_quick_above: false,
             toolbar_position: None,
             chooser_position: None,
             tool_row_relayout_guard: None,
@@ -4614,7 +4441,6 @@ impl PortfolioApp {
             menu_index: 0,
             drag: Drag::None,
             layer_scroll: 0,
-            panel_scroll: 0.,
             status: "Ваш первый этюд. Рисуйте поверх или создайте чистый холст.".into(),
             status_until: Instant::now() + Duration::from_secs(20),
             path: None,
@@ -4660,13 +4486,26 @@ impl PortfolioApp {
     fn stage(&self) -> Rect {
         Rect::new(0., 64., self.w(), (self.h() - 64.).max(0.))
     }
+    fn default_toolbar_rect(&self) -> Rect {
+        let width = (self.w() - 96.).clamp(0., TOOLBAR_WIDTH);
+        Rect::new((self.w() - width) / 2., 80., width, 48.)
+    }
     fn top_tools_rect(&self) -> Rect {
-        let width = (self.w() - 96.).max(0.).min(TOOLBAR_WIDTH);
-        let position = self
-            .toolbar_position
-            .unwrap_or(((self.w() - width) / 2., 80.));
+        let home = self.default_toolbar_rect();
+        let width = home.w;
+        let position = self.toolbar_position.unwrap_or((home.x, home.y));
         let (x, y) = self.constrain_panel_position(position, (width, 48.));
         Rect::new(x, y, width, 48.)
+    }
+    fn pin_feedback_visible(&self) -> bool {
+        self.pin_feedback_until
+            .is_some_and(|end| Instant::now() < end)
+    }
+    fn toolbar_grip_over_chooser(&self) -> bool {
+        self.tool_panel_pinned
+            && self
+                .tool_popup_rect()
+                .is_some_and(|r| r.intersects(self.toolbar_grip_rect()))
     }
     fn toolbar_grip_rect(&self) -> Rect {
         let bar = self.top_tools_rect();
@@ -4688,6 +4527,7 @@ impl PortfolioApp {
     }
     fn quick_controls_visible(&self) -> bool {
         !self.focused_mode
+            && !self.color_disc.open
             && self.tool_has_properties()
             && (self.tool == Tool::Text
                 || self.tool_popup.is_none()
@@ -4695,23 +4535,24 @@ impl PortfolioApp {
                 || self.tool_settings_visible())
             && self.closing_popup.is_none()
     }
-    fn quick_controls_rect(&self) -> Rect {
-        if self.tool == Tool::Text {
-            if let Some(r) = self.tool_popup_rect() {
-                let bar = self.top_tools_rect();
-                let y = if !self.tool_panel_pinned && r.y < bar.y {
-                    r.y - 48.
+    pub fn quick_controls_rect(&self) -> Rect {
+        if self.tool == Tool::Text || self.tool_panel_pinned {
+            if let Some(chooser) = self.tool_popup_rect() {
+                let gap = if self.tool == Tool::Text { 8. } else { 12. };
+                let below = Rect::new(chooser.x, chooser.y + chooser.h + gap, chooser.w, 40.);
+                let above = chooser.y - gap - below.h;
+                let opens_above = if self.tool_panel_pinned {
+                    self.pinned_quick_above
                 } else {
-                    r.y + r.h + 8.
+                    chooser.y < self.top_tools_rect().y
                 };
-                let (x, y) = self.constrain_panel_position((r.x, y), (r.w, 40.));
-                return Rect::new(x, y, r.w, 40.);
-            }
-        }
-        if self.tool_panel_pinned {
-            if let Some(family) = self.tool_popup {
-                let chooser = self.tool_popup_bounds(family);
-                return Rect::new(chooser.x, chooser.y + chooser.h + 12., chooser.w, 40.);
+                let y = if above >= 72. && (opens_above || below.y + below.h > self.h() - 16.) {
+                    above
+                } else {
+                    below.y
+                };
+                let (x, y) = self.constrain_panel_position((chooser.x, y), (chooser.w, below.h));
+                return Rect::new(x, y, chooser.w, below.h);
             }
         }
         let width = (self.w() - 640.)
@@ -4820,7 +4661,9 @@ impl PortfolioApp {
         )
     }
     fn tool_settings_visible(&self) -> bool {
-        self.overlay == Overlay::ToolProperties && self.tool_has_properties()
+        self.overlay == Overlay::ToolProperties
+            && self.tool_has_properties()
+            && !self.color_disc.open
     }
     fn editor_interactive(&self) -> bool {
         matches!(self.overlay, Overlay::None | Overlay::ToolProperties)
@@ -4863,6 +4706,12 @@ impl PortfolioApp {
             ToolPanel::for_tool(self.tool).map_or(Action::Tool(self.tool), Action::ToolPanel)
         }
     }
+    fn layer_rows_top(&self) -> f32 {
+        self.right_panel_rect().y + 100.
+    }
+    fn visible_layer_count(&self) -> usize {
+        (((self.h() - 62. - self.layer_rows_top() - 40.) / 44.).floor() + 1.).max(1.) as usize
+    }
     fn right_panel_rect(&self) -> Rect {
         Rect::new(self.w() - 304., 144., 288., (self.h() - 160.).max(0.))
     }
@@ -4877,14 +4726,15 @@ impl PortfolioApp {
         self.hover = None;
         self.pending_focus = Some(Action::Settings);
     }
-    fn tool_popup_rect(&self) -> Option<Rect> {
-        if self.focused_mode {
+    pub fn tool_popup_rect(&self) -> Option<Rect> {
+        if self.focused_mode || self.color_disc.open {
             return None;
         }
         self.tool_popup.map(|family| self.tool_popup_bounds(family))
     }
     fn tool_popup_contains(&self, x: f32, y: f32) -> bool {
-        !self.focused_mode
+        !self.color_disc.open
+            && !self.focused_mode
             && self
                 .tool_popup
                 .is_some_and(|family| self.tool_popup_surface_contains(family, x, y))
@@ -4910,21 +4760,15 @@ impl PortfolioApp {
     }
     fn tool_popup_bounds(&self, family: ToolPanel) -> Rect {
         let width = self.tool_chooser_width(family);
-        if self.tool_panel_pinned {
-            let position = self
-                .chooser_position
-                .unwrap_or(((self.w() - width) / 2., 136.));
-            let (x, y) = self.constrain_panel_position(position, (width, 148.));
-            return Rect::new(x, y, width, 96.);
-        }
-        Rect::new(
-            self.tool_family_rect(family)
-                .x
-                .clamp(16., (self.w() - width - 16.).max(16.)),
-            self.follow_toolbar_y(96.),
-            width,
-            96.,
-        )
+        let position = if self.tool_panel_pinned {
+            let home = self.default_toolbar_rect();
+            self.chooser_position
+                .unwrap_or((home.x + 8., home.y + home.h + 8.))
+        } else {
+            (self.tool_family_rect(family).x, self.follow_toolbar_y(96.))
+        };
+        let (x, y) = self.constrain_panel_position(position, (width, 96.));
+        Rect::new(x, y, width, 96.)
     }
     fn tool_chooser_width(&self, family: ToolPanel) -> f32 {
         let width: f32 = if family == ToolPanel::Shapes {
@@ -4932,12 +4776,9 @@ impl PortfolioApp {
         } else {
             464.
         };
-        let width = if self.tool_panel_pinned {
-            width.min((self.w() - 640.).max(244.))
-        } else {
-            width
-        };
-        width.min((self.w() - 32.).max(0.))
+        width
+            .min((self.w() - 640.).max(244.))
+            .min((self.w() - 32.).max(0.))
     }
     fn constrain_panel_position(&self, position: (f32, f32), size: (f32, f32)) -> (f32, f32) {
         (
@@ -4958,6 +4799,7 @@ impl PortfolioApp {
     fn panel_rect(&self, kind: PanelKind) -> Rect {
         match kind {
             PanelKind::Toolbar => self.top_tools_rect(),
+            PanelKind::Properties => self.tool_settings_rect(),
             PanelKind::Chooser => self.tool_popup_bounds(
                 self.tool_popup
                     .or_else(|| ToolPanel::for_tool(self.tool))
@@ -4967,21 +4809,18 @@ impl PortfolioApp {
     }
     fn panel_size(&self, kind: PanelKind) -> (f32, f32) {
         let rect = self.panel_rect(kind);
-        (
-            rect.w,
-            if kind == PanelKind::Chooser {
-                148.
-            } else {
-                rect.h
-            },
-        )
+        (rect.w, rect.h)
+    }
+    fn panel_position(&self, kind: PanelKind) -> Option<(f32, f32)> {
+        match kind {
+            PanelKind::Toolbar => self.toolbar_position,
+            PanelKind::Chooser => self.chooser_position,
+            PanelKind::Properties => self.tool_properties_ui.position,
+        }
     }
     fn begin_panel_drag(&mut self, kind: PanelKind, x: f32, y: f32) {
         let rect = self.panel_rect(kind);
-        let initial = match kind {
-            PanelKind::Toolbar => self.toolbar_position,
-            PanelKind::Chooser => self.chooser_position,
-        };
+        let initial = self.panel_position(kind);
         self.browser_search_focus = false;
         self.settings_ui.focused = false;
         self.pending_properties_focus = false;
@@ -5003,7 +4842,13 @@ impl PortfolioApp {
         let position = position.map(|p| self.constrain_panel_position(p, self.panel_size(kind)));
         match kind {
             PanelKind::Toolbar => self.toolbar_position = position,
-            PanelKind::Chooser => self.chooser_position = position,
+            PanelKind::Chooser => {
+                self.chooser_position = position;
+                if position.is_none() {
+                    self.pinned_quick_above = false;
+                }
+            }
+            PanelKind::Properties => self.tool_properties_ui.position = position,
         }
         // Keep the actual last painted area guarded even when moving one panel
         // does not change the bounding box of the entire row.
@@ -5018,6 +4863,7 @@ impl PortfolioApp {
     fn reset_panel_positions(&mut self) {
         self.set_panel_position(PanelKind::Toolbar, None);
         self.set_panel_position(PanelKind::Chooser, None);
+        self.set_panel_position(PanelKind::Properties, None);
     }
     fn clamp_panel_positions(&mut self) {
         if let Some(position) = self.toolbar_position {
@@ -5030,6 +4876,11 @@ impl PortfolioApp {
                     self.constrain_panel_position(position, self.panel_size(PanelKind::Chooser)),
                 );
             }
+        }
+        if let Some(position) = self.tool_properties_ui.position {
+            self.tool_properties_ui.position = Some(
+                self.constrain_panel_position(position, self.panel_size(PanelKind::Properties)),
+            );
         }
     }
     fn panel_position_key(&mut self, code: u32, modifiers: Modifiers) -> bool {
@@ -5045,6 +4896,7 @@ impl PortfolioApp {
             .or(self.pending_focus);
         let (kind, action) = match action {
             Some(Action::MoveToolbar) => (PanelKind::Toolbar, Action::MoveToolbar),
+            Some(Action::MoveToolProperties) => (PanelKind::Properties, Action::MoveToolProperties),
             Some(Action::PinToolPanel) if self.tool_panel_pinned => {
                 (PanelKind::Chooser, Action::PinToolPanel)
             }
@@ -5061,6 +4913,7 @@ impl PortfolioApp {
             _ => return false,
         };
         self.set_panel_position(kind, next);
+        self.pending_properties_focus = kind == PanelKind::Properties;
         self.pending_focus = Some(action);
         true
     }
@@ -5106,6 +4959,22 @@ impl PortfolioApp {
         view.items.set_extent(item_width, item_viewport);
         view.categories
             .set_extent(category_width, category_viewport);
+    }
+    fn list_scroll_mut(&mut self, list: ScrollList) -> &mut crate::tool_browser::Scroll {
+        match list {
+            ScrollList::Fonts => &mut self.font_picker.scroll,
+            ScrollList::Presets(family, row) => self.browser_scroll_mut(family, row),
+        }
+    }
+    fn begin_list_drag(&mut self, list: ScrollList, x: f32, y: f32, pending: Option<Action>) {
+        self.drag = Drag::List {
+            list,
+            start_x: x,
+            start_y: y,
+            initial: self.list_scroll_mut(list).offset,
+            moved: false,
+            pending,
+        };
     }
     fn browser_scroll_mut(
         &mut self,
@@ -5469,35 +5338,30 @@ impl PortfolioApp {
     fn prepare_vertical_scroll(&mut self, surface: ScrollSurface) {
         match surface {
             ScrollSurface::Settings => self.prepare_settings_layout(),
-            ScrollSurface::DocumentFonts => self.prepare_font_list(),
             ScrollSurface::ToolProperties => self.prepare_tool_settings_layout(),
         }
     }
     fn vertical_scroll_state(&self, surface: ScrollSurface) -> crate::tool_browser::Scroll {
         match surface {
             ScrollSurface::Settings => self.settings_ui.scroll,
-            ScrollSurface::DocumentFonts => self.font_picker.scroll,
             ScrollSurface::ToolProperties => self.tool_settings_scroll(),
         }
     }
     fn vertical_scroll_track(&self, surface: ScrollSurface) -> Rect {
         match surface {
             ScrollSurface::Settings => self.settings_scrollbar_track(),
-            ScrollSurface::DocumentFonts => self.font_scroll_track(),
             ScrollSurface::ToolProperties => self.tool_settings_scrollbar_track(),
         }
     }
     fn vertical_scroll_thumb(&self, surface: ScrollSurface) -> Rect {
         match surface {
             ScrollSurface::Settings => self.settings_scrollbar_thumb(),
-            ScrollSurface::DocumentFonts => self.font_scroll_thumb(),
             ScrollSurface::ToolProperties => self.tool_settings_scrollbar_thumb(),
         }
     }
     fn set_vertical_scroll(&mut self, surface: ScrollSurface, offset: f32) -> bool {
         match surface {
             ScrollSurface::Settings => self.settings_scroll_to(offset),
-            ScrollSurface::DocumentFonts => self.font_picker.scroll.set(offset),
             ScrollSurface::ToolProperties => self.tool_settings_scroll_to(offset),
         }
     }
@@ -5580,7 +5444,6 @@ impl PortfolioApp {
         self.set_vertical_scroll(surface, offset);
         self.pending_focus = Some(match surface {
             ScrollSurface::Settings => Action::SettingsScroll,
-            ScrollSurface::DocumentFonts => Action::FontListScroll,
             ScrollSurface::ToolProperties => Action::ToolPropertiesScroll,
         });
         true
@@ -5662,7 +5525,6 @@ impl PortfolioApp {
             self.last_shape = tool;
         }
         self.tool = tool;
-        self.panel_scroll = self.panel_scroll.clamp(0., (782. - self.h()).max(0.));
         if self.overlay == Overlay::ToolProperties && !self.tool_has_properties() {
             self.dismiss_tool_settings();
         }
@@ -5928,6 +5790,12 @@ impl PortfolioApp {
     }
     fn tick(&mut self, out: &mut Vec<Effect>) {
         if self
+            .pin_feedback_until
+            .is_some_and(|end| Instant::now() >= end)
+        {
+            self.pin_feedback_until = None;
+        }
+        if self
             .quick_preview
             .is_some_and(|(_, until)| Instant::now() >= until)
         {
@@ -6024,9 +5892,7 @@ impl PortfolioApp {
                         Ok(()) => {
                             self.import_count += 1;
                             self.changed();
-                            self.inspector_layers = true;
                             self.focused_mode = false;
-                            self.panel_scroll = 0.;
                             self.layer_scroll = 0;
                         }
                         Err(e) => {
@@ -6198,7 +6064,7 @@ impl PortfolioApp {
             t.surface
         };
         p.rounded(r, 4., bg);
-        if selected || focus {
+        if selected || focus || (action == Action::PinToolPanel && self.pin_feedback_visible()) {
             let thickness = if focus { 1.5 } else { 1. };
             p.rounded(r, 4., t.accent);
             p.rounded(r.inset(thickness), 4. - thickness, bg);
@@ -6943,7 +6809,7 @@ impl PortfolioApp {
         self.end_reveal(p);
     }
     fn draw_closing_overlay(&mut self, p: &mut Painter) {
-        if self.overlay != Overlay::None {
+        if self.overlay != Overlay::None || self.color_disc.open {
             return;
         }
         let Some(overlay) = self.closing_overlay else {
