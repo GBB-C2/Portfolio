@@ -657,6 +657,14 @@ fn main() {
                 dy,
             );
         }
+        if has("--color-disc") {
+            let trigger = app.color_trigger();
+            click(
+                &mut app,
+                trigger.x + trigger.w * 0.5,
+                trigger.y + trigger.h * 0.5,
+            );
+        }
         let mut frame = app.render();
         for text in &mut frame.texts {
             text.x *= scale;

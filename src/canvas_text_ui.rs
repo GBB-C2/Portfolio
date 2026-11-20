@@ -63,9 +63,13 @@ impl PortfolioApp {
                 x,
                 y,
                 body: String::new(),
+                color: self.brush.color,
                 ..self.text_style.clone()
             }
         };
+        if text.color != self.brush.color {
+            self.update_color(text.color);
+        }
         let entering = self.tool != Tool::Text;
         self.switch_tool(Tool::Text);
         self.focused_mode = false;
@@ -161,6 +165,11 @@ impl PortfolioApp {
         let px = |n: f32| (n * self.scale).round() as i32;
         let bounds = |r: Rect| [px(r.x), px(r.y), px(r.x + r.w), px(r.y + r.h)];
         let mut panels = Vec::new();
+        if self.color_disc.open {
+            // The popup owns outside clicks. Keep the native text session and selection
+            // alive, and paint its foreground in the canvas preview until dismissal.
+            panels.push(bounds(self.stage()));
+        }
         if !self.focused_mode {
             panels.extend([
                 bounds(self.top_tools_rect()),
@@ -214,9 +223,6 @@ impl PortfolioApp {
                     self.feedback("Щёлкните по холсту для новой надписи.");
                 }
             }
-            Action::ApplyText | Action::CancelText => {
-                self.finish_canvas_text(a == Action::ApplyText, out);
-            }
             Action::TextFont(forward) => {
                 let text = self.current_text_mut();
                 let fonts = UiFont::ALL;
@@ -233,12 +239,6 @@ impl PortfolioApp {
                 t.italic = !t.italic;
             }
             Action::TextAlign(align) => self.current_text_mut().align = align,
-            Action::TextColor => out.push(Self::prompt(
-                26,
-                "Цвет текста",
-                "Шесть символов HEX, например #365AD7",
-                hex(self.current_text().color),
-            )),
             Action::TextX | Action::TextY if self.draft.is_some() => {
                 let (id, axis, value) = if a == Action::TextX {
                     (27, "X", self.current_text().x)
@@ -262,8 +262,7 @@ impl PortfolioApp {
             Action::TextSize | Action::ResetSlider(Slider::TextSize) => 1,
             Action::TextBold | Action::TextItalic => 2,
             Action::TextAlign(_) => 3,
-            Action::TextColor => 4,
-            Action::TextX | Action::TextY => 5,
+            Action::TextX | Action::TextY => 4,
             Action::TextEffect(_)
             | Action::EffectColor
             | Action::ResetSlider(Slider::TextEffect(_))
@@ -291,7 +290,6 @@ impl PortfolioApp {
                 Action::TextAlign(Left),
                 Action::TextAlign(Center),
                 Action::TextAlign(Right),
-                Action::TextColor,
             ]);
             if self.draft.is_some() {
                 items.extend([Action::TextX, Action::TextY]);
@@ -308,10 +306,6 @@ impl PortfolioApp {
         if self.tool_settings_scroll().max() > 0. {
             items.push(Action::ToolPropertiesScroll);
         }
-        items.push(Action::NewText);
-        if self.draft.is_some() {
-            items.extend([Action::CancelText, Action::ApplyText]);
-        }
         items
     }
 
@@ -323,9 +317,9 @@ impl PortfolioApp {
             &[Outline, Shadow, ShadowOpacity]
         }
     }
-    pub(super) const TEXT_ROWS: [f32; 6] = [0., 42., 97., 137., 177., 217.];
+    pub(super) const TEXT_ROWS: [f32; 5] = [0., 42., 97., 137., 177.];
 
-    pub(super) fn draw_text_settings(&mut self, p: &mut Painter, panel: Rect, body: Rect) {
+    pub(super) fn draw_text_settings(&mut self, p: &mut Painter, body: Rect) {
         let t = Theme::with_accent(self.dark, self.accent);
         let text = self.current_text().clone();
         let active = self.draft.is_some();
@@ -338,8 +332,9 @@ impl PortfolioApp {
             } else {
                 0.
             };
-        let field = x + 96.;
-        let fw = w - 96.;
+        let label_w = (w * 0.32).clamp(60., 96.);
+        let field = x + label_w;
+        let fw = w - label_w;
         let row = |i: usize| y + Self::TEXT_ROWS[i];
         p.clip = body;
         self.hit_clip = Some(body);
@@ -348,11 +343,10 @@ impl PortfolioApp {
                 (0, "Шрифт"),
                 (2, "Начертание"),
                 (3, "Выравнивание"),
-                (4, "Цвет текста"),
-                (5, "Позиция"),
+                (4, "Позиция"),
             ] {
                 p.text(
-                    Rect::new(x, row(i), 92., 30.),
+                    Rect::new(x, row(i), label_w - 4., 30.),
                     label,
                     11.,
                     t.muted,
@@ -427,22 +421,6 @@ impl PortfolioApp {
                     false,
                 );
             }
-            self.button(
-                p,
-                Rect::new(field, row(4), fw, 30.),
-                Action::TextColor,
-                &hex(text.color),
-                None,
-                false,
-                enabled,
-                false,
-            );
-            p.rounded(Rect::new(field + 8., row(4) + 7., 16., 16.), 3., t.border);
-            p.rounded(
-                Rect::new(field + 9., row(4) + 8., 14., 14.),
-                2.,
-                rgb(text.color),
-            );
             for (i, action, axis, value) in [
                 (0, Action::TextX, "X", text.x),
                 (1, Action::TextY, "Y", text.y),
@@ -454,7 +432,7 @@ impl PortfolioApp {
                 };
                 self.button(
                     p,
-                    Rect::new(field + i as f32 * (half + 4.), row(5), half, 30.),
+                    Rect::new(field + i as f32 * (half + 4.), row(4), half, 30.),
                     action,
                     &value,
                     None,
@@ -473,7 +451,7 @@ impl PortfolioApp {
             }
             let cy = y + self.text_effect_params().len() as f32 * 54.;
             p.text(
-                Rect::new(x, cy, 92., 30.),
+                Rect::new(x, cy, label_w - 4., 30.),
                 "Цвет эффекта",
                 11.,
                 t.muted,
@@ -495,26 +473,6 @@ impl PortfolioApp {
                 Rect::new(field + 8., cy + 7., 16., 16.),
                 3.,
                 rgb(text.effects.color),
-            );
-        }
-        p.clip = panel.inset(1.);
-        self.hit_clip = Some(p.clip);
-        let y = panel.y + panel.h - 44.;
-        let width = (body.w - 12.) / 3.;
-        for (i, action, label, available) in [
-            (0, Action::NewText, "Новая надпись", true),
-            (1, Action::CancelText, "Отмена", active),
-            (2, Action::ApplyText, "Применить", active),
-        ] {
-            self.button(
-                p,
-                Rect::new(x + i as f32 * (width + 6.), y, width, 32.),
-                action,
-                label,
-                None,
-                false,
-                available && enabled,
-                action == Action::ApplyText && active,
             );
         }
     }
@@ -604,24 +562,6 @@ impl PortfolioApp {
             0.2126 * f32::from(ink.r) + 0.7152 * f32::from(ink.g) + 0.0722 * f32::from(ink.b);
         p.rounded(preview, 4., if luma < 135. { 0xeeeae3 } else { 0x26262b });
         self.draw_text_sample(p, preview.inset(1.), text, None);
-        let width = (panel.w - 40.) / 3.;
-        for (i, label) in ["Шрифт", "Эффекты", "3D"].into_iter().enumerate() {
-            self.button(
-                p,
-                Rect::new(
-                    panel.x + 16. + i as f32 * (width + 4.),
-                    panel.y + 53.,
-                    width,
-                    29.,
-                ),
-                Action::ToolSection(i as u8),
-                label,
-                None,
-                self.tool_settings_section() == i as u8,
-                true,
-                false,
-            );
-        }
     }
 
     pub(super) fn draw_text_basics(&mut self, p: &mut Painter) {
@@ -634,7 +574,7 @@ impl PortfolioApp {
         p.clip = row.inset(1.);
         self.hit_clip = Some(p.clip);
         let size_width = (row.w * 0.19).clamp(50., 82.);
-        let button_width = (row.w - size_width - 26.) / 7.;
+        let button_width = (row.w - size_width - 22.) / 5.;
         let size = Rect::new(row.x + 6., row.y + 4., size_width, row.h - 8.);
         self.button(
             p,
@@ -675,20 +615,12 @@ impl PortfolioApp {
             (Action::TextBold, "bold", "Полужирный", text.bold, true),
             (Action::TextItalic, "italic", "Курсив", text.italic, true),
             (Action::CycleTextAlign, align, "Выравнивание", false, true),
-            (Action::TextColor, "", "Цвет текста", false, true),
             (
                 Action::NewText,
                 "plus",
                 "Новая надпись",
                 self.place_new_text,
                 true,
-            ),
-            (
-                Action::ApplyText,
-                "check",
-                "Применить",
-                false,
-                self.draft.is_some(),
             ),
         ]
         .into_iter()
@@ -701,20 +633,17 @@ impl PortfolioApp {
                 size.h,
             );
             self.icon_button(p, r, a, icon, label, selected, enabled && !self.busy);
-            if a == Action::TextColor {
-                p.circle(r.x + r.w / 2., r.y + r.h / 2., 8., t.muted, true);
-                p.circle(r.x + r.w / 2., r.y + r.h / 2., 6.5, rgb(text.color), true);
-            }
         }
         p.clip = clip;
         self.hit_clip = None;
     }
 
     pub(super) fn draw_draft_effects(&mut self, p: &mut Painter, canvas: Rect, stage: Rect) {
+        let face = self.color_disc.open;
         let Some(draft) = self
             .draft
             .as_ref()
-            .filter(|d| d.text.effects.visible() && !d.text.body.trim().is_empty())
+            .filter(|d| (face || d.text.effects.visible()) && !d.text.body.trim().is_empty())
         else {
             self.draft_effects = None;
             return;
@@ -723,14 +652,18 @@ impl PortfolioApp {
         if self
             .draft_effects
             .as_ref()
-            .is_none_or(|(old, ow, oh, lang, _)| {
-                old != &draft.text || *ow != w || *oh != h || *lang != self.language
+            .is_none_or(|(old, ow, oh, lang, old_face, _)| {
+                *old_face != face
+                    || old != &draft.text
+                    || *ow != w
+                    || *oh != h
+                    || *lang != self.language
             })
         {
-            let tile = platform::render_text_tile(&draft.text, w, h, self.language, false).ok();
-            self.draft_effects = Some((draft.text.clone(), w, h, self.language, tile));
+            let tile = platform::render_text_tile(&draft.text, w, h, self.language, face).ok();
+            self.draft_effects = Some((draft.text.clone(), w, h, self.language, face, tile));
         }
-        if let Some((_, _, _, _, Some(tile))) = &self.draft_effects {
+        if let Some((_, _, _, _, _, Some(tile))) = &self.draft_effects {
             let clip = p.clip;
             p.clip = canvas.intersection(stage);
             let r = Rect::new(

@@ -48,6 +48,9 @@ impl PortfolioApp {
     }
 
     fn tool_settings_section_label(&self, section: u8) -> &'static str {
+        if self.tool == Tool::Text {
+            return ["Шрифт", "Эффекты", "3D"][section as usize];
+        }
         match section {
             1 if self.tool_settings_brushes() => "Отпечаток",
             1 => "Заливка",
@@ -81,7 +84,7 @@ impl PortfolioApp {
     fn tool_settings_content_height(&self) -> f32 {
         if self.tool == Tool::Text {
             return if self.tool_settings_section() == 0 {
-                253.
+                213.
             } else {
                 self.text_effect_params().len() as f32 * 54. + 36.
             };
@@ -91,12 +94,9 @@ impl PortfolioApp {
 
     pub(super) fn tool_settings_rect(&self) -> Rect {
         let left = 16.;
-        let width = if self.tool == Tool::Text {
-            (self.w() * 0.32).clamp(328., 400.)
-        } else {
-            (self.w() - 336.).clamp(360., 448.)
-        }
-        .min((self.w() - 32.).max(0.));
+        let width = (self.w() - 336.)
+            .clamp(360., 448.)
+            .min((self.w() - 32.).max(0.));
         let preferred_height: f32 = if self.tool == Tool::Text {
             420.
         } else if self.tool_settings_brushes() {
@@ -161,15 +161,9 @@ impl PortfolioApp {
 
     pub(super) fn tool_settings_viewport(&self) -> Rect {
         let panel = self.tool_settings_rect();
-        if self.tool == Tool::Text {
-            return Rect::new(
-                panel.x + 16.,
-                panel.y + 93.,
-                panel.w - 32.,
-                (panel.h - 145.).max(0.),
-            );
-        }
-        let (header, footer) = if self.tool_settings_brushes() {
+        let (header, footer) = if self.tool == Tool::Text {
+            (60., 16.)
+        } else if self.tool_settings_brushes() {
             (78., 64.)
         } else {
             (60., 28.)
@@ -480,17 +474,11 @@ impl PortfolioApp {
         let brushes = self.tool_settings_brushes();
         if brushes {
             self.draw_preset_header(p);
+        } else if self.tool == Tool::Text {
+            self.draw_text_header(p, panel);
         }
 
         let body = self.tool_settings_viewport();
-        if self.tool == Tool::Text {
-            self.draw_text_header(p, panel);
-            self.draw_text_settings(p, panel, body);
-            self.draw_tool_scrollbar(p);
-            self.hit_clip = None;
-            p.clip = Rect::new(0., 0., self.w(), self.h());
-            return;
-        }
         let section = self.tool_settings_section();
         for index in 0..self.tool_settings_section_count() {
             let row = Rect::new(panel.x + 12., body.y + index as f32 * 34., 104., 32.);
@@ -520,6 +508,16 @@ impl PortfolioApp {
                 TextAlign::Left,
             );
             self.control(row, Action::ToolSection(index), label, true);
+        }
+
+        if self.tool == Tool::Text {
+            self.draw_text_settings(p, body);
+            p.clip = panel.inset(1.);
+            self.hit_clip = Some(p.clip);
+            self.draw_tool_scrollbar(p);
+            self.hit_clip = None;
+            p.clip = Rect::new(0., 0., self.w(), self.h());
+            return;
         }
 
         let origin = body.y - self.tool_settings_scroll().offset;

@@ -172,6 +172,8 @@ const CATALOG: &[(&str, [&str; 5])] = &[
     ("Размер шрифта", ["Font size", "Schriftgröße", "글꼴 크기", "字号", "フォントサイズ"]),
     ("Шрифт", ["Font", "Schrift", "글꼴", "字体", "フォント"]),
     ("Начертание", ["Style", "Schriftschnitt", "글꼴 스타일", "字形", "書体"]),
+    ("Цветовой круг", ["Color disc", "Farbkreis", "색상환", "色盘", "カラーディスク"]),
+    ("Насыщенность и яркость", ["Saturation and brightness", "Sättigung und Helligkeit", "채도 및 밝기", "饱和度和亮度", "彩度と明度"]),
     ("Цвет текста", ["Text color", "Textfarbe", "텍스트 색상", "文字颜色", "文字色"]),
     ("Позиция", ["Position", "Position", "위치", "位置", "位置"]),
     ("Предыдущий шрифт", ["Previous font", "Vorherige Schrift", "이전 글꼴", "上一种字体", "前のフォント"]),
