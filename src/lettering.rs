@@ -7,6 +7,9 @@ pub struct TextEffects {
     pub outline: u8,
     pub shadow: u8,
     pub shadow_opacity: u8,
+    pub shadow_angle: u16,
+    pub underline: bool,
+    pub strikeout: bool,
     pub depth: u8,
     pub angle: u16,
     pub color: Color,
@@ -18,6 +21,9 @@ impl Default for TextEffects {
             outline: 0,
             shadow: 0,
             shadow_opacity: 45,
+            shadow_angle: 45,
+            underline: false,
+            strikeout: false,
             depth: 0,
             angle: 45,
             color: Color::from_hex(0x363646),
@@ -31,6 +37,7 @@ impl TextEffects {
             && self.shadow <= 32
             && self.shadow_opacity <= 100
             && self.depth <= 48
+            && self.shadow_angle <= 360
             && self.angle <= 360
     }
 
@@ -84,9 +91,12 @@ impl TextEffects {
             }
         };
         if self.shadow > 0 && self.shadow_opacity > 0 {
-            let d = i32::from(self.shadow);
+            let (sin, cos) = f32::from(self.shadow_angle).to_radians().sin_cos();
+            // Use the dominant-axis distance to preserve the original 45° shadow.
+            let d = f32::from(self.shadow) / sin.abs().max(cos.abs());
+            let (dx, dy) = ((cos * d).round() as i32, (sin * d).round() as i32);
             let color = Color::rgba(0, 0, 0, (u16::from(self.shadow_opacity) * 255 / 100) as u8);
-            shifted_rows(mask, w, h, d, d, |dest, src| {
+            shifted_rows(mask, w, h, dx, dy, |dest, src| {
                 over(&mut out[dest..dest + src.len()], src, color)
             });
         }
@@ -412,14 +422,16 @@ pub enum EffectParam {
     ShadowOpacity,
     Depth,
     Direction,
+    ShadowAngle,
 }
 impl EffectParam {
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Outline,
         Self::Shadow,
         Self::ShadowOpacity,
         Self::Depth,
         Self::Direction,
+        Self::ShadowAngle,
     ];
     pub fn info(self) -> (f32, f32, &'static str, u32, &'static str) {
         let (max, label, id, unit) = match self {
@@ -427,6 +439,7 @@ impl EffectParam {
             Self::Shadow => (32., "Смещение тени", 31, "px"),
             Self::ShadowOpacity => (100., "Непрозрачность тени", 32, "%"),
             Self::Depth => (48., "Глубина 3D", 33, "px"),
+            Self::ShadowAngle => (360., "Направление тени", 35, "°"),
             Self::Direction => (360., "Направление объёма", 34, "°"),
         };
         (0., max, label, id, unit)
@@ -438,6 +451,7 @@ impl EffectParam {
             Self::ShadowOpacity => e.shadow_opacity as f32,
             Self::Depth => e.depth as f32,
             Self::Direction => e.angle as f32,
+            Self::ShadowAngle => e.shadow_angle as f32,
         }
     }
     pub fn set(self, e: &mut TextEffects, v: f32) {
@@ -448,6 +462,7 @@ impl EffectParam {
             Self::ShadowOpacity => e.shadow_opacity = n as u8,
             Self::Depth => e.depth = n as u8,
             Self::Direction => e.angle = n,
+            Self::ShadowAngle => e.shadow_angle = n,
         }
     }
 }
@@ -534,6 +549,45 @@ mod tests {
         assert!(edge
             .chunks(w as usize)
             .all(|row| row[20..].iter().all(|p| p.a == 0)));
+    }
+
+    #[test]
+    fn underlining_strikeout_and_shadow_direction_survive_a_decorated_project() {
+        use crate::{document::Document, i18n::Language, platform::rasterize_text};
+        #[cfg(target_os = "linux")]
+        if !crate::platform::preview_fonts_available() {
+            return;
+        }
+        let mut text = TextLayer {
+            body: "ab  cd\nEF".into(),
+            size: 30,
+            x: 10,
+            y: 10,
+            ..Default::default()
+        };
+        let render = |t: &TextLayer| rasterize_text(t, 180, 110, Language::Russian).unwrap();
+        let plain = render(&text);
+        text.effects.underline = true;
+        let underline = render(&text);
+        assert!(plain != underline);
+        text.effects.strikeout = true;
+        assert!(render(&text) != underline);
+        text.effects.shadow = 7;
+        text.effects.shadow_angle = 180;
+        let left = render(&text);
+        text.effects.shadow_angle = 0;
+        let right = render(&text);
+        assert!(left != right);
+        let mut doc = Document::new(180, 110).unwrap();
+        doc.set_text_layer(None, text.clone(), right.clone())
+            .unwrap();
+        let bytes = doc.to_bytes().unwrap();
+        assert_eq!(&bytes[..8], b"PRTFOL04");
+        let restored = Document::from_bytes(&bytes).unwrap();
+        assert_eq!(restored.active_layer().text.as_ref(), Some(&text));
+        assert!(restored.composite() == right);
+        assert!(doc.undo() && doc.redo());
+        assert_eq!(doc.to_bytes().unwrap(), bytes);
     }
 
     #[test]

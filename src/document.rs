@@ -26,6 +26,34 @@ const STYLED_MAGIC: &[u8; 8] = b"PRTFOL03";
 const TEXT_MAGIC: &[u8; 8] = b"PRTFOL02";
 const MAGIC: &[u8; 8] = b"PRTFOL01";
 
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum ProjectFormat {
+    Raster,
+    Text,
+    Styled,
+    Decorated,
+}
+impl ProjectFormat {
+    fn magic(self) -> &'static [u8; 8] {
+        match self {
+            Self::Raster => MAGIC,
+            Self::Text => TEXT_MAGIC,
+            Self::Styled => STYLED_MAGIC,
+            Self::Decorated => b"PRTFOL04",
+        }
+    }
+    fn for_text(t: &TextLayer) -> Self {
+        let e = t.effects;
+        if e.underline || e.strikeout || e.shadow_angle != 45 {
+            Self::Decorated
+        } else if e != Default::default() {
+            Self::Styled
+        } else {
+            Self::Text
+        }
+    }
+}
+
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Color {
@@ -132,10 +160,14 @@ pub enum BrushKind {
     Calligraphy,
     Spray,
     Flat,
+    Bristle,
+    Stipple,
+    Dry,
+    Twin,
 }
 
 impl BrushKind {
-    pub const ALL: [Self; 10] = [
+    pub const ALL: [Self; 14] = [
         Self::Ink,
         Self::Soft,
         Self::Marker,
@@ -146,6 +178,10 @@ impl BrushKind {
         Self::Calligraphy,
         Self::Spray,
         Self::Flat,
+        Self::Bristle,
+        Self::Stipple,
+        Self::Dry,
+        Self::Twin,
     ];
     pub const fn index(self) -> u8 {
         self as u8
@@ -160,6 +196,60 @@ pub enum ShapeKind {
     Line,
     Rectangle,
     Ellipse,
+    Triangle,
+    Diamond,
+    Pentagon,
+    Hexagon,
+    Star,
+}
+
+impl ShapeKind {
+    pub const ALL: [Self; 8] = [
+        Self::Line,
+        Self::Rectangle,
+        Self::Ellipse,
+        Self::Triangle,
+        Self::Diamond,
+        Self::Pentagon,
+        Self::Hexagon,
+        Self::Star,
+    ];
+
+    /// Normalized vertices shared by the outline, fill and catalogue icon.
+    pub(crate) fn polygon(self) -> &'static [(f64, f64)] {
+        match self {
+            Self::Triangle => &[(0.5, 0.), (1., 1.), (0., 1.)],
+            Self::Diamond => &[(0.5, 0.), (1., 0.5), (0.5, 1.), (0., 0.5)],
+            Self::Pentagon => &[
+                (0.5, 0.),
+                (1., 0.382),
+                (0.809, 1.),
+                (0.191, 1.),
+                (0., 0.382),
+            ],
+            Self::Hexagon => &[
+                (0.25, 0.),
+                (0.75, 0.),
+                (1., 0.5),
+                (0.75, 1.),
+                (0.25, 1.),
+                (0., 0.5),
+            ],
+            Self::Star => &[
+                (0.5, 0.),
+                (0.618, 0.376),
+                (1., 0.382),
+                (0.695, 0.618),
+                (0.809, 1.),
+                (0.5, 0.767),
+                (0.191, 1.),
+                (0.305, 0.618),
+                (0., 0.382),
+                (0.382, 0.376),
+            ],
+            _ => &[],
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -174,6 +264,8 @@ pub struct Brush {
     pub scatter: f32,
     pub roundness: f32,
     pub grain: f32,
+    pub texture_scale: f32,
+    pub opacity_jitter: f32,
     pub kind: BrushKind,
     pub erase: bool,
     pub mirror: bool,
@@ -192,6 +284,8 @@ impl Default for Brush {
             scatter: 0.0,
             roundness: 1.0,
             grain: 0.0,
+            texture_scale: 1.0,
+            opacity_jitter: 0.0,
             kind: BrushKind::Ink,
             erase: false,
             mirror: false,
@@ -229,6 +323,8 @@ impl Brush {
             },
             roundness: finite(self.roundness, 1.0, 0.1, 1.0),
             grain: finite(self.grain, 0.0, 0.0, 1.0),
+            texture_scale: finite(self.texture_scale, 1.0, 0.25, 4.0),
+            opacity_jitter: finite(self.opacity_jitter, 0.0, 0.0, 1.0),
             scatter: finite(self.scatter, 0.0, 0.0, 1.0),
             ..self
         }
@@ -695,8 +791,8 @@ impl BrushMask {
                     t * t * (3.0 - 2.0 * t)
                 };
                 let noise = grain(
-                    u.floor() as i32,
-                    v.floor() as i32,
+                    (u / brush.texture_scale).floor() as i32,
+                    (v / brush.texture_scale).floor() as i32,
                     brush.kind.index() as u32 + 17,
                 );
                 let edge = |a: f32, extent: f32| (extent + 0.5 - a.abs()).clamp(0.0, 1.0);
@@ -737,11 +833,36 @@ impl BrushMask {
                                 0.0
                             }
                     }
+                    BrushKind::Bristle => {
+                        let pitch = (radius * 0.27 * brush.texture_scale).max(1.5);
+                        let strand = ((v / pitch).rem_euclid(1.) - 0.5).abs();
+                        aa * softness * (1. - strand * 3.).clamp(0., 1.) * (0.55 + 0.45 * noise)
+                    }
+                    BrushKind::Stipple => {
+                        let pitch = (radius * 0.47 * brush.texture_scale).max(2.);
+                        let gx = (u / pitch).floor() as i32;
+                        let gy = (v / pitch).floor() as i32;
+                        let dx = u.rem_euclid(pitch) - pitch * (0.3 + grain(gx, gy, 43) * 0.4);
+                        let dy = v.rem_euclid(pitch) - pitch * (0.3 + grain(gx, gy, 59) * 0.4);
+                        aa * softness * (pitch * 0.22 + 0.5 - dx.hypot(dy)).clamp(0., 1.)
+                    }
+                    BrushKind::Dry => {
+                        let fleck = grain(
+                            (u / (4. * brush.texture_scale)).floor() as i32,
+                            (v / brush.texture_scale).floor() as i32,
+                            73,
+                        );
+                        aa * softness * ((fleck - 0.38) * 2.2).clamp(0., 1.) * (0.45 + noise * 0.5)
+                    }
+                    BrushKind::Twin => {
+                        let d = u.hypot(v.abs() - radius * 0.52);
+                        (radius * 0.26 + 0.5 - d).clamp(0., 1.) * softness
+                    }
                     BrushKind::Flat => {
                         edge(u, radius * 0.96)
                             * edge(v, radius * 0.27)
                             * softness
-                            * (0.72 + grain(u.floor() as i32, 0, 91) * 0.28)
+                            * (0.72 + grain((u / brush.texture_scale).floor() as i32, 0, 91) * 0.28)
                     }
                 };
                 let value = value * (1.0 - brush.grain * noise);
@@ -821,6 +942,7 @@ struct ShapeGeometry {
     y1: f32,
     brush: Brush,
     filled: bool,
+    fill_opacity: f32,
 }
 
 impl ShapeGeometry {
@@ -844,7 +966,23 @@ impl ShapeGeometry {
             y1,
             brush: brush.sanitized(),
             filled: filled && kind != ShapeKind::Line,
+            fill_opacity: 1.,
         })
+    }
+    fn vertices(&self) -> Vec<(f64, f64)> {
+        let (x, y) = (
+            f64::from(self.x0.min(self.x1)),
+            f64::from(self.y0.min(self.y1)),
+        );
+        let (w, h) = (
+            f64::from(self.x0.max(self.x1)) - x,
+            f64::from(self.y0.max(self.y1)) - y,
+        );
+        self.kind
+            .polygon()
+            .iter()
+            .map(|&(u, v)| (x + u * w, y + v * h))
+            .collect()
     }
 }
 
@@ -1719,11 +1857,19 @@ impl Document {
         let scatter = brush.scatter * brush.size;
         let x = x + (grain(index as i32, 17, 0x91) - 0.5) * scatter;
         let y = y + (grain(index as i32, 31, 0xb7) - 0.5) * scatter;
-        self.stamp_one(x, y, brush, mask, &mask.alpha, false);
+        let varied;
+        let alpha = if brush.opacity_jitter > 0. {
+            let strength = 1. - brush.opacity_jitter * grain(index as i32, 47, 0xd3);
+            varied = mask.alpha.map(|a| (f32::from(a) * strength).round() as u8);
+            &varied
+        } else {
+            &mask.alpha
+        };
+        self.stamp_one(x, y, brush, mask, alpha, false);
         if brush.mirror {
             let mx = self.width as f32 - x;
             if (mx - x).abs() > 0.01 {
-                self.stamp_one(x, y, brush, mask, &mask.alpha, true);
+                self.stamp_one(x, y, brush, mask, alpha, true);
             }
         }
     }
@@ -1938,7 +2084,23 @@ impl Document {
         brush: Brush,
         filled: bool,
     ) -> Result<bool, String> {
-        let geometry = ShapeGeometry::new(kind, x0, y0, x1, y1, brush, filled)?;
+        self.preview_shape_fill_opacity(kind, (x0, y0), (x1, y1), brush, filled, 1.)
+    }
+
+    pub fn preview_shape_fill_opacity(
+        &mut self,
+        kind: ShapeKind,
+        start: (f32, f32),
+        end: (f32, f32),
+        brush: Brush,
+        filled: bool,
+        fill_opacity: f32,
+    ) -> Result<bool, String> {
+        if !fill_opacity.is_finite() {
+            return Err("Некорректная непрозрачность заливки.".into());
+        }
+        let mut geometry = ShapeGeometry::new(kind, start.0, start.1, end.0, end.1, brush, filled)?;
+        geometry.fill_opacity = fill_opacity.clamp(0., 1.);
         self.ensure_paintable()?;
         if let Some(previous) = &self.shape_preview {
             if previous.width != self.width
@@ -1969,6 +2131,9 @@ impl Document {
                 && before.size == after.size
                 && before.hardness == after.hardness
                 && before.angle == after.angle
+                && before.roundness == after.roundness
+                && before.grain == after.grain
+                && before.texture_scale == after.texture_scale
             {
                 previous.mask
             } else {
@@ -2044,6 +2209,12 @@ impl Document {
         let cy = (top + bottom) * 0.5;
         let rx = (right - left) * 0.5;
         let ry = (bottom - top) * 0.5;
+        let vertices = geometry.vertices();
+        let mut polygon_row = if vertices.is_empty() {
+            Vec::new()
+        } else {
+            vec![0.; max_x - min_x]
+        };
         let mut changed = false;
         for y in min_y..max_y {
             let row_top = (y as f64).max(top);
@@ -2058,6 +2229,33 @@ impl Document {
                     *span = (cx - extent, cx + extent);
                 }
             }
+            if !vertices.is_empty() {
+                polygon_row.fill(0.);
+                // Even–odd scan lines also cover the concave valleys of a star.
+                for sample in 0..4 {
+                    let sy = row_top + row_height * (sample as f64 + 0.5) / 4.;
+                    let mut crossings = [0.; 10];
+                    let mut n = 0;
+                    for (i, &(ax, ay)) in vertices.iter().enumerate() {
+                        let (bx, by) = vertices[(i + 1) % vertices.len()];
+                        if (ay > sy) != (by > sy) {
+                            crossings[n] = ax + (sy - ay) / (by - ay) * (bx - ax);
+                            n += 1;
+                        }
+                    }
+                    crossings[..n].sort_by(f64::total_cmp);
+                    for pair in crossings[..n].chunks_exact(2) {
+                        let from = pair[0].floor().clamp(min_x as f64, max_x as f64) as usize;
+                        let to = pair[1].ceil().clamp(min_x as f64, max_x as f64) as usize;
+                        for x in from..to {
+                            polygon_row[x - min_x] +=
+                                (pair[1].min(x as f64 + 1.) - pair[0].max(x as f64)).clamp(0., 1.)
+                                    * row_height
+                                    * 0.25;
+                        }
+                    }
+                }
+            }
             let outer_left = spans.iter().map(|s| s.0).fold(f64::INFINITY, f64::min);
             let outer_right = spans.iter().map(|s| s.1).fold(f64::NEG_INFINITY, f64::max);
             let inner_left = spans.iter().map(|s| s.0).fold(f64::NEG_INFINITY, f64::max);
@@ -2068,7 +2266,9 @@ impl Document {
             let solid_max_x = inner_right.floor().clamp(min_x as f64, max_x as f64) as usize;
             let mut row_changed = false;
             for x in row_min_x..row_max_x {
-                let coverage = if x >= solid_min_x && x < solid_max_x {
+                let coverage = if !vertices.is_empty() {
+                    polygon_row[x - min_x]
+                } else if x >= solid_min_x && x < solid_max_x {
                     row_height
                 } else if kind == ShapeKind::Rectangle {
                     (right.min((x + 1) as f64) - left.max(x as f64)).clamp(0.0, 1.0) * row_height
@@ -2080,8 +2280,10 @@ impl Document {
                         * 0.25
                         * row_height
                 };
-                let alpha = (coverage as f32 * brush.opacity * brush.flow * 255.0 + 0.5)
-                    .clamp(0.0, 255.0) as u8;
+                let alpha =
+                    (coverage as f32 * geometry.fill_opacity * brush.opacity * brush.flow * 255.0
+                        + 0.5)
+                        .clamp(0.0, 255.0) as u8;
                 if alpha == 0 {
                     continue;
                 }
@@ -2204,6 +2406,14 @@ impl Document {
                         (cx + rx * angle.cos()) as f32,
                         (cy + ry * angle.sin()) as f32,
                     );
+                }
+            }
+            _ => {
+                let path = geometry.vertices();
+                let (sx, sy) = path[0];
+                self.begin_stroke_with_mask(sx as f32, sy as f32, brush, mask);
+                for &(x, y) in path[1..].iter().chain(&path[..1]) {
+                    self.continue_stroke(x as f32, y as f32);
                 }
             }
         }
@@ -2468,18 +2678,14 @@ impl Document {
         let mut bytes = Vec::with_capacity(
             self.layers.len() * self.width as usize * self.height as usize * 4 + 2048,
         );
-        let extended = self
+        let format = self
             .layers
             .iter()
             .filter_map(|l| l.text.as_ref())
-            .any(|t| t.effects != Default::default());
-        bytes.extend_from_slice(if extended {
-            STYLED_MAGIC
-        } else if self.layers.iter().any(|l| l.text.is_some()) {
-            TEXT_MAGIC
-        } else {
-            MAGIC
-        });
+            .map(ProjectFormat::for_text)
+            .max()
+            .unwrap_or(ProjectFormat::Raster);
+        bytes.extend_from_slice(format.magic());
         push_u32(&mut bytes, self.width);
         push_u32(&mut bytes, self.height);
         push_u32(&mut bytes, self.layers.len() as u32);
@@ -2495,7 +2701,7 @@ impl Document {
             ]);
             push_string(&mut bytes, &layer.name);
             if let Some(text) = &layer.text {
-                text.write(&mut bytes, extended);
+                text.write(&mut bytes, format);
             }
             for p in &layer.pixels {
                 bytes.extend_from_slice(&[p.r, p.g, p.b, p.a]);
@@ -2520,10 +2726,16 @@ impl Document {
             return Err("Файл повреждён: контрольная сумма не совпадает.".into());
         }
         let mut reader = Reader::new(&bytes[..checksum_at]);
-        let version = reader.take(8)?;
-        if version != MAGIC && version != TEXT_MAGIC && version != STYLED_MAGIC {
-            return Err("Неизвестная версия файла Portfolio.".into());
-        }
+        let magic = reader.take(8)?;
+        let format = [
+            ProjectFormat::Raster,
+            ProjectFormat::Text,
+            ProjectFormat::Styled,
+            ProjectFormat::Decorated,
+        ]
+        .into_iter()
+        .find(|f| f.magic() == magic)
+        .ok_or("Неизвестная версия файла Portfolio.")?;
         let width = reader.u32()?;
         let height = reader.u32()?;
         let count = pixel_count(width, height)?;
@@ -2546,18 +2758,13 @@ impl Document {
             }
             max_id = max_id.max(id);
             let flags = reader.take(4)?;
-            if flags[0] > 1 || flags[1] > 1 || flags[3] > u8::from(version != MAGIC) {
+            if flags[0] > 1 || flags[1] > 1 || flags[3] > u8::from(format >= ProjectFormat::Text) {
                 return Err("Повреждены параметры слоя.".into());
             }
             let (visible, locked, opacity) = (flags[0] != 0, flags[1] != 0, flags[2]);
             let name = reader.string(512)?;
             let text = if flags[3] == 1 {
-                Some(TextLayer::read(
-                    &mut reader,
-                    width,
-                    height,
-                    version == STYLED_MAGIC,
-                )?)
+                Some(TextLayer::read(&mut reader, width, height, format)?)
             } else {
                 None
             };
@@ -2985,6 +3192,96 @@ mod tests {
     }
 
     #[test]
+    fn new_tip_footprints_and_dynamics_change_paint_and_erasing_symmetrically() {
+        let stroke = |kind, texture_scale, opacity_jitter, erase| {
+            let mut d = Document::new(120, 76).unwrap();
+            if erase {
+                d.layers[0].pixels.fill(Color::BLACK);
+            }
+            let brush = Brush {
+                kind,
+                size: 23.,
+                spacing: 0.8,
+                mirror: true,
+                erase,
+                texture_scale,
+                opacity_jitter,
+                ..red_brush()
+            };
+            d.begin_stroke(19., 22., brush).unwrap();
+            d.continue_stroke(38., 51.);
+            assert!(d.end_stroke());
+            let pixels = d.active_layer().pixels.clone();
+            for row in pixels.chunks_exact(120) {
+                assert!(row.iter().eq(row.iter().rev()));
+            }
+            pixels
+        };
+        for erase in [false, true] {
+            let mut prints = Vec::new();
+            for tip in [
+                BrushKind::Bristle,
+                BrushKind::Stipple,
+                BrushKind::Dry,
+                BrushKind::Twin,
+            ] {
+                let original = stroke(tip, 1., 0., erase);
+                assert!(!prints.contains(&original));
+                let jitter = stroke(tip, 1., 0.95, erase);
+                assert!(original != jitter);
+                assert!(jitter == stroke(tip, 1., 0.95, erase));
+                if tip != BrushKind::Twin {
+                    assert!(original != stroke(tip, 2.5, 0., erase));
+                }
+                prints.push(original);
+            }
+        }
+    }
+
+    #[test]
+    fn polygon_fill_opacity_preserves_outline_and_concave_notches_across_commit_and_undo() {
+        let brush = Brush {
+            size: 2.,
+            ..red_brush()
+        };
+        for kind in [
+            ShapeKind::Triangle,
+            ShapeKind::Diamond,
+            ShapeKind::Pentagon,
+            ShapeKind::Hexagon,
+            ShapeKind::Star,
+        ] {
+            let mut d = Document::new(100, 100).unwrap();
+            d.preview_shape_fill_opacity(kind, (10., 10.), (90., 90.), brush, true, 0.)
+                .unwrap();
+            assert_eq!(d.sample(50, 50).a, 0);
+            let tip = if kind == ShapeKind::Hexagon {
+                (30, 10)
+            } else {
+                (50, 10)
+            };
+            assert!(d.sample(tip.0, tip.1).a > 0);
+            d.preview_shape_fill_opacity(kind, (90., 90.), (10., 10.), brush, true, 0.25)
+                .unwrap();
+            assert_eq!(d.sample(50, 50).a, 64);
+            if kind == ShapeKind::Star {
+                assert_eq!(d.sample(50, 83).a, 0);
+            }
+            let shown = d.active_layer().pixels.clone();
+            assert!(d.commit_shape_preview());
+            assert!(d.active_layer().pixels == shown);
+            assert_eq!(d.undo_count(), 1);
+            assert!(d.undo() && d.active_layer().pixels.iter().all(|p| p.a == 0));
+            assert!(d.redo() && d.active_layer().pixels == shown);
+            let mut solid = Document::new(100, 100).unwrap();
+            solid
+                .draw_shape_with_fill(kind, 10., 10., 90., 90., brush, true)
+                .unwrap();
+            assert_eq!(solid.sample(50, 50).a, 255);
+        }
+    }
+
+    #[test]
     fn cached_stamp_alpha_and_reflected_bounds_match_full_mask_reference() {
         // Deliberately scan the complete mask with the original scalar alpha
         // calculation. This oracle does not use cached alpha or row bounds.
@@ -3192,6 +3489,8 @@ mod tests {
                         expected.draw_rectangle(28.25, 32.5, 137.5, 128.75, brush)
                     }
                     ShapeKind::Ellipse => expected.draw_ellipse(28.25, 32.5, 137.5, 128.75, brush),
+                    other => expected
+                        .draw_shape_with_fill(other, 28.25, 32.5, 137.5, 128.75, brush, false),
                 }
                 .unwrap();
                 let mut live = Document::from_pixels(257, 193, baseline.clone()).unwrap();

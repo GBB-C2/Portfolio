@@ -65,7 +65,7 @@ impl TextLayer {
         Ok(())
     }
 
-    pub(super) fn write(&self, bytes: &mut Vec<u8>, extended: bool) {
+    pub(super) fn write(&self, bytes: &mut Vec<u8>, format: ProjectFormat) {
         push_string(bytes, &self.body);
         push_string(bytes, &self.font);
         for v in [self.x, self.y, self.size] {
@@ -80,11 +80,15 @@ impl TextLayer {
             self.italic as u8,
             self.align as u8,
         ]);
-        if extended {
+        if format >= ProjectFormat::Styled {
             let e = self.effects;
             bytes.extend_from_slice(&[e.outline, e.shadow, e.shadow_opacity, e.depth]);
             bytes.extend_from_slice(&e.angle.to_le_bytes());
             bytes.extend_from_slice(&[e.color.r, e.color.g, e.color.b, e.color.a]);
+            if format >= ProjectFormat::Decorated {
+                bytes.push(u8::from(e.underline) | (u8::from(e.strikeout) << 1));
+                bytes.extend_from_slice(&e.shadow_angle.to_le_bytes());
+            }
         }
     }
 
@@ -92,7 +96,7 @@ impl TextLayer {
         reader: &mut Reader,
         width: u32,
         height: u32,
-        extended: bool,
+        format: ProjectFormat,
     ) -> Result<Self, String> {
         let body = reader.utf8(16384)?;
         let font = reader.string(128)?;
@@ -114,9 +118,21 @@ impl TextLayer {
             y,
             size,
             align,
-            effects: if extended {
+            effects: if format >= ProjectFormat::Styled {
                 let v = reader.take(10)?;
+                let (flags, angle) = if format >= ProjectFormat::Decorated {
+                    let d = reader.take(3)?;
+                    if d[0] > 3 {
+                        return Err("Повреждены параметры слоя.".into());
+                    }
+                    (d[0], u16::from_le_bytes([d[1], d[2]]))
+                } else {
+                    (0, 45)
+                };
                 TextEffects {
+                    underline: flags & 1 != 0,
+                    strikeout: flags & 2 != 0,
+                    shadow_angle: angle,
                     outline: v[0],
                     shadow: v[1],
                     shadow_opacity: v[2],

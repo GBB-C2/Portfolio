@@ -614,6 +614,50 @@ impl Painter {
             self.polyline(&q, 1.6, c);
         };
         match name {
+            "triangle" | "diamond" | "pentagon" | "hexagon" | "star_shape" => {
+                use crate::document::ShapeKind::*;
+                let kind = match name {
+                    "triangle" => Triangle,
+                    "diamond" => Diamond,
+                    "pentagon" => Pentagon,
+                    "hexagon" => Hexagon,
+                    _ => Star,
+                };
+                let path = kind.polygon();
+                let points: Vec<_> = path
+                    .iter()
+                    .chain(&path[..1])
+                    .map(|&(u, v)| (2. + 16. * u as f32, 2. + 16. * v as f32))
+                    .collect();
+                pts(&points);
+            }
+            "underline" => {
+                pts(&[
+                    (5., 3.),
+                    (5., 10.),
+                    (7., 13.),
+                    (10., 14.),
+                    (13., 13.),
+                    (15., 10.),
+                    (15., 3.),
+                ]);
+                pts(&[(3., 17.), (17., 17.)]);
+            }
+            "strikeout" => {
+                pts(&[
+                    (15., 5.),
+                    (12., 3.),
+                    (7., 3.),
+                    (5., 6.),
+                    (7., 9.),
+                    (13., 11.),
+                    (15., 14.),
+                    (12., 17.),
+                    (7., 17.),
+                    (4., 15.),
+                ]);
+                pts(&[(2., 10.), (18., 10.)]);
+            }
             "left" => pts(&[(13., 4.), (7., 10.), (13., 16.)]),
             "right" => pts(&[(7., 4.), (13., 10.), (7., 16.)]),
             "brush" => {

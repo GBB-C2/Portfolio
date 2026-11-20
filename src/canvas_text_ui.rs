@@ -165,7 +165,7 @@ impl PortfolioApp {
         let px = |n: f32| (n * self.scale).round() as i32;
         let bounds = |r: Rect| [px(r.x), px(r.y), px(r.x + r.w), px(r.y + r.h)];
         let mut panels = Vec::new();
-        if self.color_disc.open {
+        if self.tool_popover_open() {
             // The popup owns outside clicks. Keep the native text session and selection
             // alive, and paint its foreground in the canvas preview until dismissal.
             panels.push(bounds(self.stage()));
@@ -234,6 +234,14 @@ impl PortfolioApp {
                 let t = self.current_text_mut();
                 t.bold = !t.bold;
             }
+            Action::TextUnderline => {
+                let e = &mut self.current_text_mut().effects;
+                e.underline = !e.underline;
+            }
+            Action::TextStrikeout => {
+                let e = &mut self.current_text_mut().effects;
+                e.strikeout = !e.strikeout;
+            }
             Action::TextItalic => {
                 let t = self.current_text_mut();
                 t.italic = !t.italic;
@@ -260,7 +268,10 @@ impl PortfolioApp {
         Some(match action {
             Action::TextFont(_) => 0,
             Action::TextSize | Action::ResetSlider(Slider::TextSize) => 1,
-            Action::TextBold | Action::TextItalic => 2,
+            Action::TextBold
+            | Action::TextItalic
+            | Action::TextUnderline
+            | Action::TextStrikeout => 2,
             Action::TextAlign(_) => 3,
             Action::TextX | Action::TextY => 4,
             Action::TextEffect(_)
@@ -287,6 +298,8 @@ impl PortfolioApp {
                 Action::ResetSlider(Slider::TextSize),
                 Action::TextBold,
                 Action::TextItalic,
+                Action::TextUnderline,
+                Action::TextStrikeout,
                 Action::TextAlign(Left),
                 Action::TextAlign(Center),
                 Action::TextAlign(Right),
@@ -314,7 +327,7 @@ impl PortfolioApp {
         if self.tool_settings_section() == 2 {
             &[Depth, Direction]
         } else {
-            &[Outline, Shadow, ShadowOpacity]
+            &[Outline, Shadow, ShadowOpacity, ShadowAngle]
         }
     }
     pub(super) const TEXT_ROWS: [f32; 5] = [0., 42., 97., 137., 177.];
@@ -386,19 +399,34 @@ impl PortfolioApp {
             );
             self.parameter_slider(p, Rect::new(x, row(1), w, 46.), Action::TextSize);
             let half = (fw - 4.) / 2.;
-            for (i, action, label, selected) in [
-                (0, Action::TextBold, "Полужирный", text.bold),
-                (1, Action::TextItalic, "Курсив", text.italic),
-            ] {
-                self.button(
+            let quarter = (fw - 12.) / 4.;
+            for (i, (action, icon, label, selected)) in [
+                (Action::TextBold, "bold", "Полужирный", text.bold),
+                (Action::TextItalic, "italic", "Курсив", text.italic),
+                (
+                    Action::TextUnderline,
+                    "underline",
+                    "Подчёркивание",
+                    text.effects.underline,
+                ),
+                (
+                    Action::TextStrikeout,
+                    "strikeout",
+                    "Зачёркивание",
+                    text.effects.strikeout,
+                ),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                self.icon_button(
                     p,
-                    Rect::new(field + i as f32 * (half + 4.), row(2), half, 30.),
+                    Rect::new(field + i as f32 * (quarter + 4.), row(2), quarter, 30.),
                     action,
+                    icon,
                     label,
-                    None,
                     selected,
                     enabled,
-                    false,
                 );
             }
             let third = (fw - 8.) / 3.;
@@ -574,7 +602,8 @@ impl PortfolioApp {
         p.clip = row.inset(1.);
         self.hit_clip = Some(p.clip);
         let size_width = (row.w * 0.19).clamp(50., 82.);
-        let button_width = (row.w - size_width - 22.) / 5.;
+        let font = self.quick_text_font_rect();
+        let button_width = (row.x + row.w - 6. - font.x - font.w - 8.) / 4.;
         let size = Rect::new(row.x + 6., row.y + 4., size_width, row.h - 8.);
         self.button(
             p,
@@ -599,19 +628,47 @@ impl PortfolioApp {
             false,
             TextAlign::Center,
         );
+        self.button(
+            p,
+            font,
+            Action::TextFonts,
+            "",
+            None,
+            self.font_picker.open,
+            !self.busy,
+            false,
+        );
+        if let Some(c) = self.controls.last_mut() {
+            c.label = "Выбор шрифта".into();
+        }
+        let name = UiFont::from_key(&text.font)
+            .map(|face| face.label())
+            .unwrap_or(&text.font);
+        p.text_raw(
+            Rect::new(font.x + 5., font.y, font.w - 23., font.h),
+            name,
+            12.,
+            t.text,
+            false,
+            false,
+            TextAlign::Left,
+        );
+        p.icon(
+            Rect::new(
+                font.x + font.w - 19.,
+                font.y + (font.h - 18.) / 2.,
+                17.,
+                18.,
+            ),
+            "down",
+            t.muted,
+        );
         let align = match text.align {
             ParagraphAlign::Left => "align_left",
             ParagraphAlign::Center => "align_center",
             ParagraphAlign::Right => "align_right",
         };
         for (i, (a, icon, label, selected, enabled)) in [
-            (
-                Action::TextFont(true),
-                "typeface",
-                "Следующий шрифт",
-                false,
-                true,
-            ),
             (Action::TextBold, "bold", "Полужирный", text.bold, true),
             (Action::TextItalic, "italic", "Курсив", text.italic, true),
             (Action::CycleTextAlign, align, "Выравнивание", false, true),
@@ -627,7 +684,7 @@ impl PortfolioApp {
         .enumerate()
         {
             let r = Rect::new(
-                size.x + size.w + 2. + i as f32 * (button_width + 2.),
+                font.x + font.w + 2. + i as f32 * (button_width + 2.),
                 size.y,
                 button_width,
                 size.h,
@@ -639,7 +696,7 @@ impl PortfolioApp {
     }
 
     pub(super) fn draw_draft_effects(&mut self, p: &mut Painter, canvas: Rect, stage: Rect) {
-        let face = self.color_disc.open;
+        let face = self.tool_popover_open();
         let Some(draft) = self
             .draft
             .as_ref()

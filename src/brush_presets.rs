@@ -11,7 +11,7 @@ pub(super) struct Preset {
 #[derive(Debug)]
 pub(super) struct Presets {
     pub entries: [Vec<Preset>; 2],
-    pub selected: [u8; 2],
+    pub selected: [usize; 2],
     dirty: bool,
 }
 
@@ -34,10 +34,12 @@ impl Default for Presets {
 }
 
 impl Presets {
+    const ORIGINAL_TIPS: usize = 10;
+    pub(super) const MAX: usize = 246 + BrushKind::ALL.len();
     fn encode(&self) -> String {
         use std::fmt::Write;
         let mut output = format!(
-            "Portfolio brushes 1\n{}\t{}\n",
+            "Portfolio brushes 2\n{}\t{}\n",
             self.selected[0], self.selected[1]
         );
         for (family, entries) in self.entries.iter().enumerate() {
@@ -45,7 +47,7 @@ impl Presets {
                 let s = entry.settings;
                 writeln!(
                     output,
-                    "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
+                    "{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}\t{}",
                     family,
                     s.kind.index(),
                     s.size,
@@ -57,6 +59,8 @@ impl Presets {
                     s.scatter,
                     s.roundness,
                     s.grain,
+                    s.texture_scale,
+                    s.opacity_jitter,
                     entry.name
                 )
                 .unwrap();
@@ -67,11 +71,18 @@ impl Presets {
 
     pub fn decode(input: &str) -> Option<Self> {
         let mut lines = input.lines();
-        if lines.next()? != "Portfolio brushes 1" {
-            return None;
-        }
+        let old = match lines.next()? {
+            "Portfolio brushes 1" => true,
+            "Portfolio brushes 2" => false,
+            _ => return None,
+        };
+        let builtin = if old {
+            Self::ORIGINAL_TIPS
+        } else {
+            BrushKind::ALL.len()
+        };
         let (paint, erase) = lines.next()?.split_once('\t')?;
-        let selected = [paint.parse::<u8>().ok()?, erase.parse::<u8>().ok()?];
+        let mut selected = [paint.parse::<usize>().ok()?, erase.parse::<usize>().ok()?];
         let mut entries: [Vec<Preset>; 2] = Default::default();
         for line in lines {
             let mut fields = line.split('\t');
@@ -90,14 +101,17 @@ impl Presets {
                 scatter: number()?,
                 roundness: number()?,
                 grain: number()?,
+                texture_scale: if old { 1. } else { number()? },
+                opacity_jitter: if old { 0. } else { number()? },
             };
             let name = fields.next()?;
             if fields.next().is_some()
                 || name.chars().count() > SearchText::MAX_SCALARS
                 || name.chars().any(char::is_control)
-                || list.len() > u8::MAX as usize
-                || (list.len() < 10 && kind.index() as usize != list.len())
-                || (list.len() >= 10 && name.trim().is_empty())
+                || list.len() >= builtin + 246
+                || kind.index() as usize >= builtin
+                || (list.len() < builtin && kind.index() as usize != list.len())
+                || (list.len() >= builtin && name.trim().is_empty())
             {
                 return None;
             }
@@ -109,18 +123,30 @@ impl Presets {
                 settings,
             });
         }
-        if (0..2).any(|f| entries[f].len() < 10 || selected[f] as usize >= entries[f].len()) {
+        if (0..2).any(|f| entries[f].len() < builtin || selected[f] >= entries[f].len()) {
             return None;
+        }
+        if old {
+            for family in 0..2 {
+                let new_tips = BrushKind::ALL[builtin..].iter().map(|&kind| Preset {
+                    name: String::new(),
+                    settings: ToolSettings::preset(kind, family == 1),
+                });
+                entries[family].splice(builtin..builtin, new_tips);
+                if selected[family] >= builtin {
+                    selected[family] += BrushKind::ALL.len() - builtin;
+                }
+            }
         }
         Some(Self {
             entries,
             selected,
-            dirty: false,
+            dirty: old,
         })
     }
 
     pub fn current(&self, family: usize) -> &Preset {
-        &self.entries[family][self.selected[family] as usize]
+        &self.entries[family][self.selected[family]]
     }
 }
 
@@ -135,7 +161,7 @@ impl PortfolioApp {
 
     pub(super) fn sync_preset(&mut self) {
         if let Some(f) = self.preset_family() {
-            let entry = &mut self.presets.entries[f][self.presets.selected[f] as usize];
+            let entry = &mut self.presets.entries[f][self.presets.selected[f]];
             let live = ToolSettings::from_brush(self.brush);
             if entry.settings != live {
                 entry.settings = live;
@@ -165,20 +191,20 @@ impl PortfolioApp {
         }
     }
 
-    pub(super) fn choose_preset(&mut self, slot: u8) {
+    pub(super) fn choose_preset(&mut self, slot: usize) {
         let Some(f) = self.preset_family() else {
             return;
         };
         self.sync_preset();
-        if let Some(preset) = self.presets.entries[f].get(slot as usize) {
+        if let Some(preset) = self.presets.entries[f].get(slot) {
             preset.settings.apply(&mut self.brush);
             self.presets.dirty |= self.presets.selected[f] != slot;
             self.presets.selected[f] = slot;
         }
     }
 
-    pub(super) fn preset_name(&self, family: usize, slot: u8) -> String {
-        let entry = &self.presets.entries[family][slot as usize];
+    pub(super) fn preset_name(&self, family: usize, slot: usize) -> String {
+        let entry = &self.presets.entries[family][slot];
         if !entry.name.is_empty() {
             return entry.name.clone();
         }
@@ -211,7 +237,7 @@ impl PortfolioApp {
                     } else {
                         ItemId::Brush(p.settings.kind)
                     };
-                    ((Action::Brush(slot as u8), item), item, p.name.as_str())
+                    ((Action::Brush(slot), item), item, p.name.as_str())
                 }),
         )
     }
@@ -227,7 +253,7 @@ impl PortfolioApp {
         }
         if add {
             let next = self.presets.entries[f].len();
-            if next > u8::MAX as usize {
+            if next >= Presets::MAX {
                 return;
             }
             let name = format!(
@@ -240,7 +266,7 @@ impl PortfolioApp {
                 name,
                 settings: ToolSettings::from_brush(self.brush),
             });
-            self.presets.selected[f] = next as u8;
+            self.presets.selected[f] = next;
             self.presets.dirty = true;
             let family = ToolPanel::for_tool(self.tool).unwrap();
             self.browser.set_category(family, Category::All);
@@ -263,7 +289,7 @@ impl PortfolioApp {
         if let Some(f) = self.preset_family() {
             let name = edit.text().trim();
             if commit && !name.is_empty() && name != self.preset_name(f, self.presets.selected[f]) {
-                self.presets.entries[f][self.presets.selected[f] as usize].name = name.to_owned();
+                self.presets.entries[f][self.presets.selected[f]].name = name.to_owned();
                 self.presets.dirty = true;
             }
         }
@@ -272,6 +298,15 @@ impl PortfolioApp {
     pub(super) fn place_name_caret(&mut self, x: f32, extend: bool) {
         let rect = self.preset_name_rect().inset(4.);
         let edit = self.tool_properties_ui.name_edit.as_ref().unwrap();
+        let caret = self.inline_caret_at(rect, edit, x);
+        self.tool_properties_ui
+            .name_edit
+            .as_mut()
+            .unwrap()
+            .move_to(caret, extend);
+    }
+
+    pub(super) fn inline_caret_at(&self, rect: Rect, edit: &SearchText, x: f32) -> usize {
         let text = edit.text();
         let mut start = 0;
         while start < edit.caret()
@@ -290,11 +325,7 @@ impl PortfolioApp {
             }
             advance += width;
         }
-        self.tool_properties_ui
-            .name_edit
-            .as_mut()
-            .unwrap()
-            .move_to(caret, extend);
+        caret
     }
 
     pub(super) fn preset_name_key(
@@ -353,5 +384,54 @@ impl PortfolioApp {
             _ => {}
         }
         true
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn version_one_custom_presets_follow_new_builtins_and_keep_their_selection() {
+        use std::fmt::Write;
+        let mut old = String::from("Portfolio brushes 1\n10\t4\n");
+        for family in 0..2 {
+            for (slot, kind) in (0..10).chain(std::iter::once(3)).enumerate() {
+                let name = if slot == 10 {
+                    "Перо 雪"
+                } else if slot == 4 {
+                    "Уголь № 1"
+                } else {
+                    ""
+                };
+                writeln!(
+                    old,
+                    "{family}\t{kind}\t18\t0.8\t0.7\t0.6\t0.23\t11\t0.1\t0.5\t0.3\t{name}"
+                )
+                .unwrap();
+            }
+        }
+        let mut loaded = Presets::decode(&old).unwrap();
+        let first_custom = BrushKind::ALL.len();
+        assert_eq!(loaded.selected, [first_custom, 4]);
+        for (family, entries) in loaded.entries.iter().enumerate() {
+            assert_eq!(entries.len(), first_custom + 1);
+            assert_eq!(entries[4].name, "Уголь № 1");
+            assert_eq!(entries[first_custom].name, "Перо 雪");
+            assert_eq!(entries[first_custom].settings.kind, BrushKind::Pencil);
+            assert_eq!(entries[first_custom].settings.size, 18.);
+            assert_eq!(entries[first_custom].settings.texture_scale, 1.);
+            assert_eq!(entries[first_custom].settings.opacity_jitter, 0.);
+            assert_eq!(
+                entries[13].settings,
+                ToolSettings::preset(BrushKind::Twin, family == 1)
+            );
+        }
+        loaded.entries[0][first_custom].settings.texture_scale = 1.7;
+        loaded.entries[0][first_custom].settings.opacity_jitter = 0.34;
+        let saved = loaded.encode();
+        assert!(saved.starts_with("Portfolio brushes 2\n"));
+        let restored = Presets::decode(&saved).unwrap();
+        assert_eq!(restored.selected, loaded.selected);
+        assert_eq!(restored.entries, loaded.entries);
     }
 }

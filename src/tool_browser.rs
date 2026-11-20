@@ -57,6 +57,19 @@ impl ItemId {
             Self::Eraser(BrushKind::Calligraphy) => "Скошенный",
             Self::Eraser(BrushKind::Spray) => "Крапчатый",
             Self::Eraser(BrushKind::Flat) => "Широкий",
+            Self::Brush(BrushKind::Bristle) => "Щетина",
+            Self::Eraser(BrushKind::Bristle) => "Щетинный",
+            Self::Brush(BrushKind::Stipple) => "Пунктирная",
+            Self::Eraser(BrushKind::Stipple) => "Точечный",
+            Self::Brush(BrushKind::Dry) => "Сухая кисть",
+            Self::Eraser(BrushKind::Dry) => "Сухой",
+            Self::Brush(BrushKind::Twin) => "Двойное перо",
+            Self::Eraser(BrushKind::Twin) => "Двойной",
+            Self::Shape(ShapeKind::Triangle) => "Треугольник",
+            Self::Shape(ShapeKind::Diamond) => "Ромб",
+            Self::Shape(ShapeKind::Pentagon) => "Пятиугольник",
+            Self::Shape(ShapeKind::Hexagon) => "Шестиугольник",
+            Self::Shape(ShapeKind::Star) => "Звезда",
             Self::Text(style) => style.label(),
             Self::Shape(ShapeKind::Line) => "Линия",
             Self::Shape(ShapeKind::Rectangle) => "Прямоугольник",
@@ -88,6 +101,23 @@ impl ItemId {
             }
             Self::Eraser(BrushKind::Spray) => "speckled speckle dots erase eraser rubber",
             Self::Eraser(BrushKind::Flat) => "wide broad erase eraser rubber",
+            Self::Brush(BrushKind::Bristle) | Self::Eraser(BrushKind::Bristle) => {
+                "bristle rake comb кисть гребёнка"
+            }
+            Self::Brush(BrushKind::Stipple) | Self::Eraser(BrushKind::Stipple) => {
+                "stipple stippling dotwork точки пуантилизм"
+            }
+            Self::Brush(BrushKind::Dry) | Self::Eraser(BrushKind::Dry) => {
+                "dry brush broken drybrush"
+            }
+            Self::Brush(BrushKind::Twin) | Self::Eraser(BrushKind::Twin) => {
+                "twin nib double parallel"
+            }
+            Self::Shape(ShapeKind::Triangle) => "triangle polygon",
+            Self::Shape(ShapeKind::Diamond) => "diamond polygon",
+            Self::Shape(ShapeKind::Pentagon) => "pentagon polygon",
+            Self::Shape(ShapeKind::Hexagon) => "hexagon polygon",
+            Self::Shape(ShapeKind::Star) => "star polygon",
             Self::Text(style) => style.aliases(),
             Self::Shape(ShapeKind::Line) => "line straight segment",
             Self::Shape(ShapeKind::Rectangle) => "rectangle rect square box",
@@ -242,16 +272,30 @@ impl Category {
             }
             Self::Volume => matches!(item, ItemId::Text(TextPreset::Block | TextPreset::Relief)),
 
-            Self::Ink => matches!(item, ItemId::Brush(B::Ink | B::Marker | B::Calligraphy)),
+            Self::Ink => matches!(
+                item,
+                ItemId::Brush(B::Ink | B::Marker | B::Calligraphy | B::Twin)
+            ),
             Self::Sketch => matches!(item, ItemId::Brush(B::Pencil | B::Charcoal | B::Chalk)),
-            Self::Painting => matches!(item, ItemId::Brush(B::Soft | B::Marker | B::Flat)),
+            Self::Painting => matches!(
+                item,
+                ItemId::Brush(B::Soft | B::Marker | B::Flat | B::Bristle | B::Dry)
+            ),
             Self::Soft => matches!(item, ItemId::Brush(B::Soft | B::Airbrush)),
-            Self::Texture => matches!(item, ItemId::Brush(B::Charcoal | B::Chalk | B::Spray)),
-            Self::Spray => matches!(item, ItemId::Brush(B::Airbrush | B::Spray)),
-            Self::Calligraphy => matches!(item, ItemId::Brush(B::Calligraphy)),
+            Self::Texture => matches!(
+                item,
+                ItemId::Brush(B::Charcoal | B::Chalk | B::Spray | B::Stipple | B::Dry | B::Bristle)
+            ),
+            Self::Spray => matches!(item, ItemId::Brush(B::Airbrush | B::Spray | B::Stipple)),
+            Self::Calligraphy => matches!(item, ItemId::Brush(B::Calligraphy | B::Twin)),
             Self::Flat => matches!(item, ItemId::Brush(B::Marker | B::Flat)),
             Self::Line => matches!(item, ItemId::Shape(S::Line)),
-            Self::Angular => matches!(item, ItemId::Shape(S::Rectangle)),
+            Self::Angular => matches!(
+                item,
+                ItemId::Shape(
+                    S::Rectangle | S::Triangle | S::Diamond | S::Pentagon | S::Hexagon | S::Star
+                )
+            ),
             Self::Curves => matches!(item, ItemId::Shape(S::Ellipse)),
         }
     }
@@ -569,10 +613,7 @@ impl Browser {
             Family::Text => TextPreset::ALL.into_iter().map(ItemId::Text).collect(),
             Family::Brush => BrushKind::ALL.into_iter().map(ItemId::Brush).collect(),
             Family::Eraser => BrushKind::ALL.into_iter().map(ItemId::Eraser).collect(),
-            Family::Shapes => [ShapeKind::Line, ShapeKind::Rectangle, ShapeKind::Ellipse]
-                .into_iter()
-                .map(ItemId::Shape)
-                .collect(),
+            Family::Shapes => ShapeKind::ALL.into_iter().map(ItemId::Shape).collect(),
         };
         self.filter_items(family, language, ids.into_iter().map(|id| (id, id, "")))
     }
@@ -706,13 +747,13 @@ mod tests {
         let mut browser = Browser::default();
         assert_eq!(
             browser.filtered_ids(Family::Brush, Language::Russian).len(),
-            10
+            BrushKind::ALL.len()
         );
         assert_eq!(
             browser
                 .filtered_ids(Family::Shapes, Language::English)
                 .len(),
-            3
+            ShapeKind::ALL.len()
         );
         browser.set_category(Family::Brush, Category::Ink);
         browser.set_query(Family::Brush, "mArKeR PEN");
