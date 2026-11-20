@@ -33,6 +33,10 @@ use brush_presets::Presets;
 mod color_disc;
 use color_disc::ColorDisc;
 
+#[path = "text_font_picker.rs"]
+mod text_font_picker;
+use text_font_picker::TextFontPicker;
+
 #[path = "canvas_text_ui.rs"]
 mod canvas_text_ui;
 use canvas_text_ui::TextDraft;
@@ -67,6 +71,11 @@ pub enum Tool {
     Line,
     Rectangle,
     Ellipse,
+    Triangle,
+    Diamond,
+    Pentagon,
+    Hexagon,
+    Star,
     Hand,
     Text,
 }
@@ -80,9 +89,30 @@ impl Tool {
             Self::Line => ("line", "Линия", "L"),
             Self::Rectangle => ("rect", "Прямоугольник", "R"),
             Self::Ellipse => ("ellipse", "Эллипс", "O"),
+            Self::Triangle => ("triangle", "Треугольник", ""),
+            Self::Diamond => ("diamond", "Ромб", ""),
+            Self::Pentagon => ("pentagon", "Пятиугольник", ""),
+            Self::Hexagon => ("hexagon", "Шестиугольник", ""),
+            Self::Star => ("star_shape", "Звезда", ""),
             Self::Text => ("text", "Текст", "T"),
             Self::Hand => ("hand", "Перемещение", "H"),
         }
+    }
+    fn shape_kind(self) -> Option<ShapeKind> {
+        match self {
+            Self::Line => Some(ShapeKind::Line),
+            Self::Rectangle => Some(ShapeKind::Rectangle),
+            Self::Ellipse => Some(ShapeKind::Ellipse),
+            Self::Triangle => Some(ShapeKind::Triangle),
+            Self::Diamond => Some(ShapeKind::Diamond),
+            Self::Pentagon => Some(ShapeKind::Pentagon),
+            Self::Hexagon => Some(ShapeKind::Hexagon),
+            Self::Star => Some(ShapeKind::Star),
+            _ => None,
+        }
+    }
+    fn closed_shape(self) -> bool {
+        self.shape_kind().is_some_and(|k| k != ShapeKind::Line)
     }
 }
 
@@ -92,7 +122,7 @@ impl ToolPanel {
             Tool::Text => Some(Self::Text),
             Tool::Brush => Some(Self::Brush),
             Tool::Eraser => Some(Self::Eraser),
-            Tool::Line | Tool::Rectangle | Tool::Ellipse => Some(Self::Shapes),
+            shape if shape.shape_kind().is_some() => Some(Self::Shapes),
             _ => None,
         }
     }
@@ -110,6 +140,8 @@ struct ToolSettings {
     scatter: f32,
     roundness: f32,
     grain: f32,
+    texture_scale: f32,
+    opacity_jitter: f32,
 }
 impl ToolSettings {
     fn from_brush(b: Brush) -> Self {
@@ -124,6 +156,8 @@ impl ToolSettings {
             scatter: b.scatter,
             roundness: b.roundness,
             grain: b.grain,
+            texture_scale: b.texture_scale,
+            opacity_jitter: b.opacity_jitter,
         }
     }
     fn apply(self, b: &mut Brush) {
@@ -137,6 +171,8 @@ impl ToolSettings {
         b.scatter = self.scatter;
         b.roundness = self.roundness;
         b.grain = self.grain;
+        b.texture_scale = self.texture_scale;
+        b.opacity_jitter = self.opacity_jitter;
     }
     fn preset(kind: BrushKind, erase: bool) -> Self {
         let (size, hardness, flow, spacing, angle, scatter) = match kind {
@@ -149,6 +185,10 @@ impl ToolSettings {
             BrushKind::Airbrush => (120., 0.05, 0.45, 0.12, 0., 0.),
             BrushKind::Calligraphy => (36., 1., 1., 0.08, 40., 0.),
             BrushKind::Spray => (72., 0.7, 0.8, 0.2, 0., 0.1),
+            BrushKind::Bristle => (42., 0.9, 0.72, 0.12, 8., 0.),
+            BrushKind::Stipple => (38., 0.95, 0.85, 0.68, 0., 0.12),
+            BrushKind::Dry => (32., 0.65, 0.68, 0.34, 16., 0.06),
+            BrushKind::Twin => (22., 0.98, 1., 0.09, 25., 0.),
             BrushKind::Flat => (48., 0.9, 0.9, 0.12, 20., 0.),
         };
         Self {
@@ -162,6 +202,8 @@ impl ToolSettings {
             scatter,
             roundness: 1.,
             grain: 0.,
+            texture_scale: 1.,
+            opacity_jitter: 0.,
         }
     }
 }
@@ -906,7 +948,7 @@ impl PortfolioApp {
                     {
                         ToolSettings::from_brush(self.brush)
                     } else {
-                        self.presets.entries[family.index()][slot as usize].settings
+                        self.presets.entries[family.index()][slot].settings
                     };
                     if self
                         .brush_samples
@@ -1712,6 +1754,11 @@ enum Action {
     SetAnimations(bool),
     Inspector(bool),
     ColorDisc,
+    TextFonts,
+    FontQuery,
+    ClearFontQuery,
+    DocumentFont(UiFont),
+    FontListScroll,
     DiscHue,
     DiscSV,
     BrowserSearch,
@@ -1729,6 +1776,9 @@ enum Action {
     AddBrush,
     Roundness,
     Grain,
+    TextureScale,
+    OpacityJitter,
+    FillOpacity,
     Hardness,
     Flow,
     Spacing,
@@ -1752,7 +1802,7 @@ enum Action {
     Mirror,
     Value,
     Grid,
-    Brush(u8),
+    Brush(usize),
     Size,
     Opacity,
     Hex,
@@ -1770,6 +1820,8 @@ enum Action {
     TextFont(bool),
     TextBold,
     TextItalic,
+    TextUnderline,
+    TextStrikeout,
     TextAlign(ParagraphAlign),
     TextX,
     TextY,
@@ -1797,6 +1849,9 @@ enum Slider {
     Angle,
     Roundness,
     Grain,
+    TextureScale,
+    OpacityJitter,
+    FillOpacity,
     Scatter,
     FontSize,
     TextSize,
@@ -1815,6 +1870,9 @@ impl Slider {
             Self::Angle => Action::Angle,
             Self::Roundness => Action::Roundness,
             Self::Grain => Action::Grain,
+            Self::TextureScale => Action::TextureScale,
+            Self::OpacityJitter => Action::OpacityJitter,
+            Self::FillOpacity => Action::FillOpacity,
             Self::Scatter => Action::Scatter,
             Self::FontSize => Action::FontSize,
             Self::TextSize => Action::TextSize,
@@ -1836,6 +1894,9 @@ impl Slider {
             Self::Angle,
             Self::Roundness,
             Self::Grain,
+            Self::TextureScale,
+            Self::OpacityJitter,
+            Self::FillOpacity,
             Self::Scatter,
             Self::FontSize,
             Self::TextSize,
@@ -1923,6 +1984,7 @@ enum BrowserRow {
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ScrollSurface {
+    DocumentFonts,
     Settings,
     ToolProperties,
 }
@@ -2049,7 +2111,7 @@ pub struct PortfolioApp {
     browser: Browser,
     browser_search_focus: bool,
     presets: Presets,
-    brush_samples: std::collections::HashMap<(bool, u8, bool), (ToolSettings, Vec<Color>)>,
+    brush_samples: std::collections::HashMap<(bool, usize, bool), (ToolSettings, Vec<Color>)>,
     brush_preview: Option<(ToolSettings, u32, bool, Vec<Color>)>,
     quick_preview: Option<(Action, Instant)>,
     quick_preview_painted: Option<PreviewHit>,
@@ -2072,9 +2134,11 @@ pub struct PortfolioApp {
     chooser_position: Option<(f32, f32)>,
     tool_row_relayout_guard: Option<Rect>,
     shape_filled: bool,
+    fill_opacity: f32,
     shape_settings: ToolSettings,
     last_shape: Tool,
     color_disc: ColorDisc,
+    font_picker: TextFontPicker,
     color_h: f32,
     color_s: f32,
     color_v: f32,
@@ -2237,7 +2301,8 @@ impl PortfolioApp {
         if properties_keyboard && a.is_parameter() {
             self.pending_focus = Some(a);
         }
-        let keeps_chooser = self.color_disc.open
+        let keeps_chooser = self.tool_popover_open()
+            || a == Action::TextFonts
             || (self.tool_settings_visible()
                 || (self.tool == Tool::Text
                     && (Self::text_row(a).is_some()
@@ -2273,7 +2338,17 @@ impl PortfolioApp {
             self.close_tool_popup();
         }
         match a {
-            Action::NoOp | Action::DiscHue | Action::DiscSV => {}
+            Action::NoOp
+            | Action::DiscHue
+            | Action::DiscSV
+            | Action::FontQuery
+            | Action::ClearFontQuery
+            | Action::FontListScroll => {}
+            Action::TextFonts => self.open_text_fonts(),
+            Action::DocumentFont(font) => {
+                self.current_text_mut().font = font.key().into();
+                self.close_text_fonts(out);
+            }
             Action::ColorDisc => {
                 self.color_disc.open = true;
                 self.pending_properties_focus = false;
@@ -2471,6 +2546,9 @@ impl PortfolioApp {
             | Action::Angle
             | Action::Roundness
             | Action::Grain
+            | Action::TextureScale
+            | Action::OpacityJitter
+            | Action::FillOpacity
             | Action::Scatter => {
                 let (min, max, label, id, _) = self.parameter_info(a);
                 out.push(Self::prompt(
@@ -2609,7 +2687,7 @@ impl PortfolioApp {
                 }
             }
             Action::Shape(tool) => {
-                if matches!(tool, Tool::Line | Tool::Rectangle | Tool::Ellipse) {
+                if tool.shape_kind().is_some() {
                     self.switch_tool(tool);
                     self.tool_popup = Some(ToolPanel::Shapes);
                     if keyboard {
@@ -2618,7 +2696,7 @@ impl PortfolioApp {
                 }
             }
             Action::ShapeFill => {
-                if matches!(self.tool, Tool::Rectangle | Tool::Ellipse) {
+                if self.tool.closed_shape() {
                     self.shape_filled = !self.shape_filled;
                     if keyboard {
                         self.pending_focus = Some(Action::ShapeFill);
@@ -2652,7 +2730,7 @@ impl PortfolioApp {
                 11,
                 match self.tool {
                     Tool::Eraser => "Размер ластика",
-                    Tool::Line | Tool::Rectangle | Tool::Ellipse => "Толщина контура",
+                    shape if shape.shape_kind().is_some() => "Толщина контура",
                     _ => "Размер кисти",
                 },
                 "Размер в пикселях: от 1 до 512",
@@ -2712,6 +2790,8 @@ impl PortfolioApp {
             | Action::TextFont(_)
             | Action::TextBold
             | Action::TextItalic
+            | Action::TextUnderline
+            | Action::TextStrikeout
             | Action::TextAlign(_)
             | Action::TextX
             | Action::TextY => self.text_action(a, out),
@@ -2838,7 +2918,7 @@ impl PortfolioApp {
                     _ => self.error(format!("Введите число от {min:.0} до {max:.0}."), out),
                 }
             }
-            17..=25 | 30..=34 => {
+            17..=25 | 30..=38 => {
                 let action = match id {
                     17 => Action::Hardness,
                     18 => Action::Flow,
@@ -2848,7 +2928,10 @@ impl PortfolioApp {
                     23 => Action::Roundness,
                     24 => Action::Grain,
                     25 => Action::TextSize,
-                    30..=34 => Action::TextEffect(EffectParam::ALL[(id - 30) as usize]),
+                    36 => Action::TextureScale,
+                    37 => Action::OpacityJitter,
+                    38 => Action::FillOpacity,
+                    30..=35 => Action::TextEffect(EffectParam::ALL[(id - 30) as usize]),
                     _ => Action::FontSize,
                 };
                 let (min, max, _, _, _) = self.parameter_info(action);
@@ -3120,6 +3203,10 @@ impl PortfolioApp {
         out: &mut Vec<Effect>,
     ) {
         self.pointer = (x, y);
+        if self.font_picker.open {
+            self.text_fonts_mouse(x, y, button, modifiers, out);
+            return;
+        }
         if self.color_disc.open {
             self.color_disc_mouse(x, y, button, modifiers, out);
             return;
@@ -3463,7 +3550,7 @@ impl PortfolioApp {
                     Err(e) => self.error(e, out),
                 }
             }
-            Tool::Line | Tool::Rectangle | Tool::Ellipse => {
+            shape if shape.shape_kind().is_some() => {
                 self.drag = Drag::Shape {
                     x: dx,
                     y: dy,
@@ -3475,6 +3562,12 @@ impl PortfolioApp {
         }
     }
     fn key(&mut self, code: u32, pressed: bool, repeat: bool, m: Modifiers, out: &mut Vec<Effect>) {
+        if self.font_picker.open {
+            if pressed {
+                self.text_fonts_key(code, m, out);
+            }
+            return;
+        }
         if self.color_disc.open {
             if pressed {
                 self.color_disc_key(code, m, out);
@@ -4004,7 +4097,7 @@ impl NativeApp for PortfolioApp {
         p.font = self.ui_font;
         p.font_scale = self.font_size as f32 / 13.;
         p.language = self.language;
-        let popup_input = self.color_disc.open.then(|| {
+        let popup_input = self.tool_popover_open().then(|| {
             (
                 self.focus.take(),
                 self.hover.take(),
@@ -4016,7 +4109,11 @@ impl NativeApp for PortfolioApp {
         if let Some((focus, hover, pending)) = popup_input {
             self.controls.clear();
             (self.focus, self.hover, self.pending_focus) = (focus, hover, pending);
-            self.draw_color_disc(&mut p);
+            if self.font_picker.open {
+                self.draw_text_fonts(&mut p);
+            } else {
+                self.draw_color_disc(&mut p);
+            }
         }
         p.frame
     }
@@ -4075,7 +4172,7 @@ impl NativeApp for PortfolioApp {
                 modifiers,
             } => {
                 if self.draft.is_some()
-                    && !self.color_disc.open
+                    && !self.tool_popover_open()
                     && button == MouseButton::Left
                     && (matches!(
                         self.drag,
@@ -4157,7 +4254,13 @@ impl NativeApp for PortfolioApp {
                 delta,
                 modifiers,
             } => {
-                if self.color_disc.open
+                if self.font_picker.open {
+                    if matches!(self.drag, Drag::None) && self.font_menu_rect().contains(x, y) {
+                        self.prepare_font_list();
+                        let offset = self.font_picker.scroll.offset - delta * 32.;
+                        self.font_picker.scroll.set(offset);
+                    }
+                } else if self.color_disc.open
                     || self
                         .tool_row_relayout_guard
                         .is_some_and(|r| r.contains(x, y))
@@ -4304,16 +4407,17 @@ impl NativeApp for PortfolioApp {
             }
             Event::Prompted { id, value } => {
                 self.accept_prompt(id, value, &mut out);
-                if (25..=34).contains(&id) && self.draft.is_some() {
+                if (25..=35).contains(&id) && self.draft.is_some() {
                     out.push(Effect::FocusCanvasText);
                 }
             }
             Event::FileSelected { kind, path } => self.selected_file(kind, path, &mut out),
             Event::Text(value) | Event::Paste(value) => {
-                if self.color_disc.open {
+                if self.font_picker.open {
+                    self.font_query_input(&value);
+                } else if self.color_disc.open {
                     return out;
-                }
-                if let Some(edit) = self.tool_properties_ui.name_edit.as_mut() {
+                } else if let Some(edit) = self.tool_properties_ui.name_edit.as_mut() {
                     edit.insert(&value);
                 } else if self.overlay == Overlay::Settings {
                     self.settings_text_input(&value);
@@ -4473,6 +4577,7 @@ impl PortfolioApp {
             chooser_position: None,
             tool_row_relayout_guard: None,
             shape_filled: false,
+            fill_opacity: 1.,
             shape_settings: ToolSettings {
                 kind: BrushKind::Ink,
                 size: 4.,
@@ -4481,6 +4586,7 @@ impl PortfolioApp {
             },
             last_shape: Tool::Rectangle,
             color_disc: ColorDisc::default(),
+            font_picker: TextFontPicker::default(),
             color_h: h,
             color_s: s,
             color_v: v,
@@ -5025,7 +5131,7 @@ impl PortfolioApp {
     }
     fn browser_item_action(item: ItemId) -> Action {
         match item {
-            ItemId::Brush(kind) | ItemId::Eraser(kind) => Action::Brush(kind.index()),
+            ItemId::Brush(kind) | ItemId::Eraser(kind) => Action::Brush(kind.index() as usize),
             ItemId::Shape(kind) => Action::Shape(Self::tool_from_shape(kind)),
             ItemId::Text(style) => Action::TextPreset(style),
         }
@@ -5281,27 +5387,31 @@ impl PortfolioApp {
         true
     }
     fn shape_kind(&self) -> Option<ShapeKind> {
-        match self.tool {
-            Tool::Line => Some(ShapeKind::Line),
-            Tool::Rectangle => Some(ShapeKind::Rectangle),
-            Tool::Ellipse => Some(ShapeKind::Ellipse),
-            _ => None,
-        }
+        self.tool.shape_kind()
     }
     fn tool_from_shape(kind: ShapeKind) -> Tool {
         match kind {
             ShapeKind::Line => Tool::Line,
             ShapeKind::Rectangle => Tool::Rectangle,
             ShapeKind::Ellipse => Tool::Ellipse,
+            ShapeKind::Triangle => Tool::Triangle,
+            ShapeKind::Diamond => Tool::Diamond,
+            ShapeKind::Pentagon => Tool::Pentagon,
+            ShapeKind::Hexagon => Tool::Hexagon,
+            ShapeKind::Star => Tool::Star,
         }
     }
     fn preview_shape_at(&mut self, x: f32, y: f32, ex: f32, ey: f32) {
         if let Some(kind) = self.shape_kind() {
             let brush = self.brush_for_tool();
-            if let Err(error) =
-                self.doc
-                    .preview_shape_with_fill(kind, x, y, ex, ey, brush, self.shape_filled)
-            {
+            if let Err(error) = self.doc.preview_shape_fill_opacity(
+                kind,
+                (x, y),
+                (ex, ey),
+                brush,
+                self.shape_filled,
+                self.fill_opacity,
+            ) {
                 self.doc.cancel_shape_preview();
                 self.drag = Drag::None;
                 self.feedback(error);
@@ -5359,30 +5469,35 @@ impl PortfolioApp {
     fn prepare_vertical_scroll(&mut self, surface: ScrollSurface) {
         match surface {
             ScrollSurface::Settings => self.prepare_settings_layout(),
+            ScrollSurface::DocumentFonts => self.prepare_font_list(),
             ScrollSurface::ToolProperties => self.prepare_tool_settings_layout(),
         }
     }
     fn vertical_scroll_state(&self, surface: ScrollSurface) -> crate::tool_browser::Scroll {
         match surface {
             ScrollSurface::Settings => self.settings_ui.scroll,
+            ScrollSurface::DocumentFonts => self.font_picker.scroll,
             ScrollSurface::ToolProperties => self.tool_settings_scroll(),
         }
     }
     fn vertical_scroll_track(&self, surface: ScrollSurface) -> Rect {
         match surface {
             ScrollSurface::Settings => self.settings_scrollbar_track(),
+            ScrollSurface::DocumentFonts => self.font_scroll_track(),
             ScrollSurface::ToolProperties => self.tool_settings_scrollbar_track(),
         }
     }
     fn vertical_scroll_thumb(&self, surface: ScrollSurface) -> Rect {
         match surface {
             ScrollSurface::Settings => self.settings_scrollbar_thumb(),
+            ScrollSurface::DocumentFonts => self.font_scroll_thumb(),
             ScrollSurface::ToolProperties => self.tool_settings_scrollbar_thumb(),
         }
     }
     fn set_vertical_scroll(&mut self, surface: ScrollSurface, offset: f32) -> bool {
         match surface {
             ScrollSurface::Settings => self.settings_scroll_to(offset),
+            ScrollSurface::DocumentFonts => self.font_picker.scroll.set(offset),
             ScrollSurface::ToolProperties => self.tool_settings_scroll_to(offset),
         }
     }
@@ -5465,12 +5580,17 @@ impl PortfolioApp {
         self.set_vertical_scroll(surface, offset);
         self.pending_focus = Some(match surface {
             ScrollSurface::Settings => Action::SettingsScroll,
+            ScrollSurface::DocumentFonts => Action::FontListScroll,
             ScrollSurface::ToolProperties => Action::ToolPropertiesScroll,
         });
         true
     }
+    fn tool_popover_open(&self) -> bool {
+        self.color_disc.open || self.font_picker.open
+    }
     fn canvas_obscured(&self, x: f32, y: f32) -> bool {
         (self.color_disc.open && self.color_popup_rect().contains(x, y))
+            || (self.font_picker.open && self.font_menu_rect().contains(x, y))
             || self
                 .tool_row_relayout_guard
                 .is_some_and(|r| r.contains(x, y))
@@ -5511,7 +5631,7 @@ impl PortfolioApp {
             return TextPreset::current(self.current_text())
                 .map_or(Action::NoOp, Action::TextPreset);
         }
-        if matches!(self.tool, Tool::Line | Tool::Rectangle | Tool::Ellipse) {
+        if self.tool.shape_kind().is_some() {
             Action::Shape(self.tool)
         } else {
             Action::Brush(self.presets.selected[self.preset_family().unwrap_or(0)])
@@ -5647,6 +5767,7 @@ impl PortfolioApp {
     }
     fn reset_document(&mut self, doc: Document, path: Option<PathBuf>, unsaved: bool) {
         self.color_disc.open = false;
+        self.font_picker = TextFontPicker::default();
         self.draft = None;
         self.place_new_text = false;
         self.document_id = self.document_id.wrapping_add(1);
@@ -6207,6 +6328,9 @@ impl Action {
                 | Self::Spacing
                 | Self::Angle
                 | Self::Grain
+                | Self::TextureScale
+                | Self::OpacityJitter
+                | Self::FillOpacity
                 | Self::Roundness
                 | Self::Scatter
         )
@@ -6518,6 +6642,9 @@ impl PortfolioApp {
             Slider::Angle => preset.angle,
             Slider::Roundness => preset.roundness * 100.,
             Slider::Grain => preset.grain * 100.,
+            Slider::TextureScale => preset.texture_scale * 100.,
+            Slider::OpacityJitter => preset.opacity_jitter * 100.,
+            Slider::FillOpacity => 100.,
             Slider::Scatter => preset.scatter * 100.,
             Slider::FontSize => Appearance::default().font_size as f32,
             Slider::TextSize => 48.,
@@ -6575,6 +6702,9 @@ impl PortfolioApp {
             Action::Spacing => (2., 200., "Интервал", 19, "%"),
             Action::Angle => (0., 360., "Угол", 20, "°"),
             Action::Roundness => (10., 100., "Округлость", 23, "%"),
+            Action::TextureScale => (25., 400., "Масштаб фактуры", 36, "%"),
+            Action::OpacityJitter => (0., 100., "Разброс непрозрачности", 37, "%"),
+            Action::FillOpacity => (0., 100., "Непрозрачность заливки", 38, "%"),
             Action::Grain => (0., 100., "Зерно", 24, "%"),
             Action::Scatter => (0., 100., "Разброс", 21, "%"),
             Action::TextEffect(p) => p.info(),
@@ -6593,6 +6723,9 @@ impl PortfolioApp {
             Action::Angle => self.brush.angle,
             Action::Roundness => self.brush.roundness * 100.,
             Action::Grain => self.brush.grain * 100.,
+            Action::TextureScale => self.brush.texture_scale * 100.,
+            Action::OpacityJitter => self.brush.opacity_jitter * 100.,
+            Action::FillOpacity => self.fill_opacity * 100.,
             Action::Scatter => self.brush.scatter * 100.,
             Action::FontSize => self.font_size as f32,
             Action::TextSize => self.current_text().size as f32,
@@ -6615,6 +6748,9 @@ impl PortfolioApp {
             Action::Angle => self.brush.angle = value,
             Action::Roundness => self.brush.roundness = value / 100.,
             Action::Grain => self.brush.grain = value / 100.,
+            Action::TextureScale => self.brush.texture_scale = value / 100.,
+            Action::OpacityJitter => self.brush.opacity_jitter = value / 100.,
+            Action::FillOpacity => self.fill_opacity = value / 100.,
             Action::Scatter => self.brush.scatter = value / 100.,
             Action::TextSize => self.current_text_mut().size = value.round() as u32,
             Action::TextEffect(p) => p.set(&mut self.current_text_mut().effects, value),

@@ -70,6 +70,8 @@ cairo_api! {
     set_source_rgba(Handle, f64, f64, f64, f64) -> (),
     move_to(Handle, f64, f64) -> (),
     show_text(Handle, *const c_char) -> (),
+    rectangle(Handle, f64, f64, f64, f64) -> (),
+    fill(Handle) -> (),
     surface_flush(Handle) -> (),
     image_surface_get_data(Handle) -> *const u8,
     image_surface_get_stride(Handle) -> c_int,
@@ -171,6 +173,27 @@ pub(crate) fn render_text_tile(
                 (y - layout.y) as f64 + font.ascent,
             );
             (api.show_text)(tile.dc, line.as_ptr());
+            if text.effects.underline || text.effects.strikeout {
+                let mut ext = Extents::default();
+                (api.text_extents)(tile.dc, line.as_ptr(), &mut ext);
+                let baseline = (y - layout.y) as f64 + font.ascent;
+                let thickness = (f64::from(text.size) / 15.).max(1.);
+                for (enabled, offset) in [
+                    (text.effects.underline, font.descent * 0.28),
+                    (text.effects.strikeout, -font.ascent * 0.36),
+                ] {
+                    if enabled {
+                        (api.rectangle)(
+                            tile.dc,
+                            (x - layout.x) as f64,
+                            baseline + offset,
+                            ext.advance,
+                            thickness,
+                        );
+                    }
+                }
+                (api.fill)(tile.dc);
+            }
         }
         (api.surface_flush)(tile.surface);
         let stride = (api.image_surface_get_stride)(tile.surface) as usize;

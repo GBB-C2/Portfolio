@@ -19,7 +19,10 @@ impl PortfolioApp {
     }
 
     fn tool_settings_section_count(&self) -> u8 {
-        if self.tool_settings_brushes() || self.tool == Tool::Text {
+        if self.tool_settings_brushes()
+            || self.tool == Tool::Text
+            || self.tool.shape_kind().is_some()
+        {
             3
         } else if self.tool == Tool::Fill {
             1
@@ -54,6 +57,7 @@ impl PortfolioApp {
         match section {
             1 if self.tool_settings_brushes() => "Отпечаток",
             1 => "Заливка",
+            2 if self.tool.shape_kind().is_some() => "Контур",
             2 => "Штрих",
             _ => "Основные",
         }
@@ -61,21 +65,32 @@ impl PortfolioApp {
 
     fn section_actions(&self, section: u8) -> &'static [Action] {
         use Action::{
-            Angle, Flow, Grain, Hardness, Opacity, Roundness, Scatter, ShapeFill, Size, Spacing,
+            Angle, FillOpacity, Flow, Grain, Hardness, Opacity, OpacityJitter, Roundness, Scatter,
+            ShapeFill, Size, Spacing, TextureScale,
         };
         if self.tool_settings_brushes() {
             match section {
                 0 => &[Size, Opacity, Hardness],
-                1 => &[Roundness, Angle, Hardness, Grain, Spacing, Scatter],
-                2 => &[Opacity, Flow, Spacing, Scatter],
+                1 => &[
+                    Roundness,
+                    Angle,
+                    Hardness,
+                    Grain,
+                    Spacing,
+                    Scatter,
+                    TextureScale,
+                ],
+                2 => &[Opacity, Flow, Spacing, Scatter, OpacityJitter],
                 _ => &[],
             }
         } else if self.tool == Tool::Fill {
             &[Opacity]
         } else if section == 0 {
             &[Size, Opacity]
-        } else if matches!(self.tool, Tool::Rectangle | Tool::Ellipse) {
-            &[ShapeFill]
+        } else if section == 2 {
+            &[Hardness, Spacing, Flow]
+        } else if self.tool.closed_shape() {
+            &[ShapeFill, FillOpacity]
         } else {
             &[]
         }
@@ -303,9 +318,7 @@ impl PortfolioApp {
                 self.prepare_tool_settings_layout();
                 return self.tool_settings_scroll().max() > 0.;
             }
-            Action::ShapeFill if !matches!(self.tool, Tool::Rectangle | Tool::Ellipse) => {
-                return false
-            }
+            Action::ShapeFill if !self.tool.closed_shape() => return false,
             _ => {}
         }
         if self.tool == Tool::Text {
@@ -691,7 +704,7 @@ impl PortfolioApp {
                 "Создать копию кисти"
             },
             false,
-            !self.busy && self.presets.entries[f].len() <= u8::MAX as usize,
+            !self.busy && self.presets.entries[f].len() < Presets::MAX,
         );
     }
 
@@ -716,7 +729,7 @@ impl PortfolioApp {
             return;
         }
         let t = Theme::with_accent(self.dark, self.accent);
-        let enabled = matches!(self.tool, Tool::Rectangle | Tool::Ellipse) && !self.busy;
+        let enabled = self.tool.closed_shape() && !self.busy;
         let focused = self.focus == Some(self.controls.len());
         let hovered = self.hover == Some(self.controls.len()) && enabled;
         let background = if hovered { t.raised } else { t.surface };

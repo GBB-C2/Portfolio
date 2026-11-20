@@ -3658,8 +3658,8 @@ fn extended_brush_scrolling_and_stamp_settings_keep_separate_paint_and_eraser_pr
     assert!(last_offset > 0.);
     assert_eq!(last_offset, app.browser.view(ToolPanel::Brush).items.max());
     assert!(!app.controls.iter().any(|c| c.action == Action::Brush(0)));
-    click_action(&mut app, Action::Brush(9));
-    assert_eq!(app.brush.kind, BrushKind::Flat);
+    click_action(&mut app, Action::Brush(BrushKind::Twin.index() as usize));
+    assert_eq!(app.brush.kind, BrushKind::Twin);
     set_tool_number(&mut app, Action::Size, "117");
     set_tool_number(&mut app, Action::Hardness, "45");
     set_tool_number(&mut app, Action::Flow, "35");
@@ -3698,11 +3698,11 @@ fn extended_brush_scrolling_and_stamp_settings_keep_separate_paint_and_eraser_pr
     browser_wheel(&mut app, ToolPanel::Brush, BrowserRow::Items, 100., false);
     click_action(&mut app, Action::Brush(0));
     browser_wheel(&mut app, ToolPanel::Brush, BrowserRow::Items, -100., false);
-    click_action(&mut app, Action::Brush(9));
+    click_action(&mut app, Action::Brush(BrushKind::Twin.index() as usize));
     assert_eq!(ToolSettings::from_brush(app.brush), paint);
     click_action(&mut app, Action::ToolPanel(ToolPanel::Eraser));
     browser_wheel(&mut app, ToolPanel::Eraser, BrowserRow::Items, -100., false);
-    click_action(&mut app, Action::Brush(9));
+    click_action(&mut app, Action::Brush(BrushKind::Twin.index() as usize));
     assert_eq!(app.tool, Tool::Eraser);
     assert_ne!(ToolSettings::from_brush(app.brush), paint);
     set_tool_number(&mut app, Action::Flow, "81");
@@ -3716,7 +3716,7 @@ fn extended_brush_scrolling_and_stamp_settings_keep_separate_paint_and_eraser_pr
     click_action(&mut app, Action::ResetBrush);
     assert_eq!(
         ToolSettings::from_brush(app.brush),
-        ToolSettings::preset(BrushKind::Flat, true)
+        ToolSettings::preset(BrushKind::Twin, true)
     );
     press_key(&mut app, 27, false);
     click_action(&mut app, Action::ToolPanel(ToolPanel::Brush));
@@ -3742,13 +3742,17 @@ fn eraser_has_its_own_catalogue_presets_and_true_erasing_samples() {
         "Скошенный",
         "Крапчатый",
         "Широкий",
+        "Щетинный",
+        "Точечный",
+        "Сухой",
+        "Двойной",
     ];
     for dark in [true, false] {
         app.dark = dark;
         for family in [ToolPanel::Brush, ToolPanel::Eraser] {
             click_action(&mut app, Action::ToolPanel(family));
             let ids = app.browser.filtered_ids(family, app.language);
-            assert_eq!(ids.len(), 10);
+            assert_eq!(ids.len(), BrushKind::ALL.len());
             for (index, id) in ids.into_iter().enumerate() {
                 assert_eq!(
                     id,
@@ -3762,21 +3766,21 @@ fn eraser_has_its_own_catalogue_presets_and_true_erasing_samples() {
                     assert_eq!(id.label(), eraser_labels[index]);
                 }
             }
-            for delta in [100., -4., -100.] {
+            for delta in [100., -4., -4., -4., -100.] {
                 browser_wheel(&mut app, family, BrowserRow::Items, delta, false);
                 app.render();
                 for c in app.controls.iter().filter(|c| c.enabled) {
                     if let Action::Brush(index) = c.action {
                         let item = if family == ToolPanel::Eraser {
-                            ItemId::Eraser(BrushKind::from_index(index))
+                            ItemId::Eraser(BrushKind::from_index(index as u8))
                         } else {
-                            ItemId::Brush(BrushKind::from_index(index))
+                            ItemId::Brush(BrushKind::from_index(index as u8))
                         };
                         assert_eq!(c.label, item.label());
                     }
                 }
             }
-            for index in 0..10 {
+            for index in 0..BrushKind::ALL.len() {
                 let key = (family == ToolPanel::Eraser, index, dark);
                 let sample = &app
                     .brush_samples
@@ -3824,6 +3828,8 @@ fn eraser_has_its_own_catalogue_presets_and_true_erasing_samples() {
     // Equal settings and theme still need distinct preview cache entries for paint and erase.
     let common = ToolSettings {
         kind: BrushKind::Ink,
+        texture_scale: 1.,
+        opacity_jitter: 0.,
         size: 14.,
         roundness: 1.,
         grain: 0.,
@@ -5288,7 +5294,7 @@ fn preset_header_renames_copies_and_restores_independent_brushes() {
     click_action(&mut app, Action::AddBrush);
     app.event(Event::Paste("Перо 雪".into()));
     press_key(&mut app, 13, false);
-    assert_eq!(app.presets.selected[0], 10);
+    assert_eq!(app.presets.selected[0], BrushKind::ALL.len());
     assert_eq!(ToolSettings::from_brush(app.brush), initial);
     set_tool_number(&mut app, Action::Roundness, "30");
     set_tool_number(&mut app, Action::Grain, "80");
@@ -5300,13 +5306,13 @@ fn preset_header_renames_copies_and_restores_independent_brushes() {
     assert_eq!(app.presets.entries[0][0].settings, initial);
     browser_query(&mut app, "雪");
     assert_eq!(app.picker_items(ToolPanel::Brush).len(), 1);
-    click_action(&mut app, Action::Brush(10));
+    click_action(&mut app, Action::Brush(BrushKind::ALL.len()));
     assert_eq!(ToolSettings::from_brush(app.brush), copied);
     let saved =
         Presets::decode(&fs::read_to_string(directory.file("brushes.txt")).unwrap()).unwrap();
     assert_eq!(saved.entries, app.presets.entries);
     assert_eq!(saved.selected, app.presets.selected);
-    assert_eq!(saved.entries[1].len(), 10);
+    assert_eq!(saved.entries[1].len(), BrushKind::ALL.len());
     assert_eq!(app.doc.to_bytes().unwrap(), doc);
 }
 
@@ -5779,7 +5785,7 @@ fn text_properties_use_the_brush_navigation_and_the_basic_strip_has_six_controls
         actions,
         [
             Action::TextSize,
-            Action::TextFont(true),
+            Action::TextFonts,
             Action::TextBold,
             Action::TextItalic,
             Action::CycleTextAlign,
@@ -5814,4 +5820,153 @@ fn text_properties_use_the_brush_navigation_and_the_basic_strip_has_six_controls
             .any(|c| c.enabled && c.action == expected && body.intersects(c.hit)));
         assert!(app.text_samples.contains_key(&None));
     }
+}
+
+#[test]
+fn quick_font_search_selects_a_typeface_without_replacing_the_canvas_draft() {
+    let mut app = floating_panel_fixture();
+    app.text_renderer = anchor_raster;
+    click_action(&mut app, Action::ToolPanel(ToolPanel::Text));
+    click_action(&mut app, Action::ToolProperties);
+    click_point(&mut app, 810., 650.);
+    let original = app.canvas_editor().unwrap();
+    let body = "Тень и свет 🌿";
+    app.event(Event::CanvasTextChanged {
+        session: original.session,
+        body: body.into(),
+    });
+    let appearance = app.ui_font;
+    click_action(&mut app, Action::TextFonts);
+    assert!(app.font_picker.open);
+    app.event(Event::Text("pRoGgY".into()));
+    app.render();
+    let results: Vec<_> = app
+        .controls
+        .iter()
+        .filter_map(|c| {
+            if let Action::DocumentFont(f) = c.action {
+                Some(f)
+            } else {
+                None
+            }
+        })
+        .collect();
+    assert_eq!(
+        results,
+        [
+            UiFont::ProggyForever,
+            UiFont::ProggyClean,
+            UiFont::ProggySquare
+        ]
+    );
+    press_key(&mut app, 65, true);
+    app.event(Event::Paste("Шрифт 雪".into()));
+    assert!(app
+        .render()
+        .texts
+        .iter()
+        .any(|r| r.text == "Шрифты не найдены"));
+    click_action(&mut app, Action::ClearFontQuery);
+    app.event(Event::Text("segoe script".into()));
+    let effects = press_key(&mut app, 13, false);
+    assert!(effects.iter().any(|e| matches!(e, Effect::FocusCanvasText)));
+    let updated = app.canvas_editor().unwrap();
+    assert_eq!(
+        (updated.session, updated.text.x, updated.text.y),
+        (original.session, original.text.x, original.text.y)
+    );
+    assert_eq!(updated.text.font, UiFont::SegoeScript.key());
+    assert_eq!(updated.text.body, body);
+    assert_eq!(app.ui_font, appearance);
+    assert!(app.tool_settings_visible());
+    assert_eq!(app.tool_popup, Some(ToolPanel::Text));
+    assert_eq!(app.doc.undo_count(), 0);
+    click_action(&mut app, Action::TextFonts);
+    app.event(Event::Text("verdana".into()));
+    press_key(&mut app, 27, false);
+    assert!(!app.font_picker.open);
+    assert_eq!(app.canvas_editor().unwrap().text, updated.text);
+    press_key(&mut app, 13, true);
+    assert_eq!(app.doc.active_layer().text.as_ref(), Some(&updated.text));
+}
+
+#[test]
+fn quick_font_list_scrolls_with_wheel_thumb_and_keyboard_and_consumes_outside_clicks() {
+    for (dark, scale) in [(true, 1.), (false, 1.5)] {
+        let mut app = floating_panel_fixture();
+        app.resize((884. * scale) as u32, (581. * scale) as u32, scale);
+        app.dark = dark;
+        let (art, zoom) = (app.doc.to_bytes().unwrap(), app.zoom);
+        click_action(&mut app, Action::ToolPanel(ToolPanel::Text));
+        click_action(&mut app, Action::PinToolPanel);
+        click_action(&mut app, Action::TextFonts);
+        app.render();
+        let panel = app.font_menu_rect();
+        let track = app.font_scroll_track();
+        assert!(track.h > 0. && app.font_picker.scroll.max() > 0.);
+        app.event(Event::Wheel {
+            x: panel.x + 25.,
+            y: track.y + 12.,
+            delta: -1.,
+            modifiers: Modifiers {
+                ctrl: true,
+                ..Default::default()
+            },
+        });
+        assert!(app.font_picker.scroll.offset > 0.);
+        let thumb = app.font_scroll_thumb();
+        left_down(&mut app, thumb.x + 5., thumb.y + 4.);
+        left_up(&mut app, thumb.x + 5., track.y + track.h - 1.);
+        assert_eq!(app.font_picker.scroll.offset, app.font_picker.scroll.max());
+        click_action(&mut app, Action::DocumentFont(UiFont::ProggySquare));
+        assert_eq!(app.current_text().font, UiFont::ProggySquare.key());
+        click_action(&mut app, Action::TextFonts);
+        press_key(&mut app, 38, false);
+        press_key(&mut app, 36, false);
+        press_key(&mut app, 13, false);
+        assert_eq!(app.current_text().font, UiFont::Bahnschrift.key());
+        click_action(&mut app, Action::TextFonts);
+        click_point(&mut app, 22., 500.);
+        assert!(!app.font_picker.open && app.draft.is_none());
+        assert_eq!(app.zoom, zoom);
+        assert_eq!(app.doc.to_bytes().unwrap(), art);
+    }
+}
+
+#[test]
+fn separate_brush_and_eraser_dynamics_and_shape_contour_use_their_property_controls() {
+    let mut app = floating_panel_fixture();
+    for (family, scale, jitter) in [
+        (ToolPanel::Brush, "190", "60"),
+        (ToolPanel::Eraser, "75", "20"),
+    ] {
+        click_action(&mut app, Action::ToolPanel(family));
+        browser_query(&mut app, "bristle");
+        click_action(&mut app, Action::Brush(BrushKind::Bristle.index() as usize));
+        set_tool_number(&mut app, Action::TextureScale, scale);
+        set_tool_number(&mut app, Action::OpacityJitter, jitter);
+        assert_eq!(
+            (
+                app.parameter_value(Action::TextureScale).round(),
+                app.parameter_value(Action::OpacityJitter).round()
+            ),
+            (scale.parse().unwrap(), jitter.parse().unwrap())
+        );
+    }
+    click_action(&mut app, Action::ToolPanel(ToolPanel::Brush));
+    assert_eq!(app.parameter_value(Action::OpacityJitter).round(), 60.);
+    app.tool_settings_reveal_action(Action::OpacityJitter);
+    click_action(&mut app, Action::ResetSlider(Slider::OpacityJitter));
+    assert_eq!(
+        app.brush.opacity_jitter,
+        ToolSettings::preset(BrushKind::Bristle, false).opacity_jitter
+    );
+    click_action(&mut app, Action::ToolPanel(ToolPanel::Shapes));
+    browser_query(&mut app, "star");
+    click_action(&mut app, Action::Shape(Tool::Star));
+    assert_eq!(app.tool.shape_kind(), Some(ShapeKind::Star));
+    set_tool_number(&mut app, Action::FillOpacity, "32");
+    set_tool_number(&mut app, Action::Spacing, "17");
+    assert_eq!(app.tool_settings_section(), 2);
+    assert!((app.fill_opacity - 0.32).abs() < 0.001 && (app.brush.spacing - 0.17).abs() < 0.001);
 }

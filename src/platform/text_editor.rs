@@ -267,20 +267,31 @@ unsafe fn update_input(
     let format_changed = initial
         || (*ptr).canvas_input.face != face
         || old.is_none_or(|old| {
-            (old.font_px, old.text.bold, old.text.italic, old.text.color)
-                != (
-                    view.font_px,
-                    view.text.bold,
-                    view.text.italic,
-                    view.text.color,
-                )
+            (
+                old.font_px,
+                old.text.bold,
+                old.text.italic,
+                old.text.color,
+                old.text.effects.underline,
+                old.text.effects.strikeout,
+            ) != (
+                view.font_px,
+                view.text.bold,
+                view.text.italic,
+                view.text.color,
+                view.text.effects.underline,
+                view.text.effects.strikeout,
+            )
         });
     let align_changed = initial || old.is_none_or(|old| old.text.align != view.text.align);
     if format_changed {
         let format = CharFormat {
             bytes: size_of::<CharFormat>() as u32,
-            mask: 0xe0000003,
-            effects: u32::from(view.text.bold) | (u32::from(view.text.italic) << 1),
+            mask: 0xe000000f,
+            effects: u32::from(view.text.bold)
+                | (u32::from(view.text.italic) << 1)
+                | (u32::from(view.text.effects.underline) << 2)
+                | (u32::from(view.text.effects.strikeout) << 3),
             height: ((view.font_px * 1440 + dpi as i32 / 2) / dpi as i32).max(1),
             offset: 0,
             color: rgb_to_colorref(crate::render::rgb(view.text.color)),
@@ -383,8 +394,8 @@ unsafe fn style_font(
         0,
         if text.bold { 700 } else { 400 },
         text.italic as u32,
-        0,
-        0,
+        u32::from(text.effects.underline),
+        u32::from(text.effects.strikeout),
         1,
         0,
         0,

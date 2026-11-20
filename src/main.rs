@@ -2,10 +2,10 @@
 use portfolio::{
     app::PortfolioApp,
     appearance::Accent,
-    document::BrushKind,
+    document::{BrushKind, ShapeKind},
     i18n::Language,
     platform::{Event, Modifiers, MouseButton, NativeApp, UiFont},
-    tool_browser::{Category, Family, ItemId},
+    tool_browser::{Browser, Category, Family, ItemId},
 };
 fn key(app: &mut PortfolioApp, code: u32, ctrl: bool) {
     app.event(Event::Key {
@@ -118,6 +118,8 @@ fn tool_viewport_point(app: &mut PortfolioApp, language: Language) -> Option<(f3
         "Отпечаток",
         "Штрих",
         "Заливка",
+        "Контур",
+        "Непрозрачность заливки",
         "Размер шрифта",
         "Толщина обводки",
         "Глубина 3D",
@@ -368,7 +370,14 @@ fn main() {
         }
         let brush = value("--brush")
             .and_then(|s| s.parse::<usize>().ok())
-            .filter(|i| *i < 10);
+            .filter(|i| *i < BrushKind::ALL.len());
+        if has("--brush") && brush.is_none() {
+            eprintln!(
+                "--brush expects a preset index from 0 to {}",
+                BrushKind::ALL.len() - 1
+            );
+            std::process::exit(2);
+        }
         let bw = (logical_width - 96.).clamp(0., portfolio::app::TOOLBAR_WIDTH);
         let bx = (logical_width - bw) / 2.;
         let shape_fill = has("--shape-fill");
@@ -380,15 +389,22 @@ fn main() {
         }
         let text_section = value("--text-section");
         let text_style = value("--text-style");
-        let family = if has("--text-panel") || text_section.is_some() || text_style.is_some() {
-            Family::Text
-        } else if has("--eraser-panel") {
-            Family::Eraser
-        } else if has("--shape-panel") || shape_fill {
-            Family::Shapes
-        } else {
-            Family::Brush
-        };
+        let font_menu = has("--text-font-menu") || has("--text-font-search");
+        let shape_kind = value("--shape-kind");
+        let family =
+            if has("--text-panel") || text_section.is_some() || text_style.is_some() || font_menu {
+                Family::Text
+            } else if has("--eraser-panel") {
+                Family::Eraser
+            } else if has("--shape-panel") || shape_kind.is_some() || shape_fill {
+                Family::Shapes
+            } else {
+                Family::Brush
+            };
+        if has("--shape-kind") && (family != Family::Shapes || shape_kind.is_none()) {
+            eprintln!("--shape-kind requires a shape name and the shapes family.");
+            std::process::exit(2);
+        }
         if has("--detail") && matches!(family, Family::Shapes | Family::Text) {
             eprintln!("--detail requires a brush or eraser.");
             std::process::exit(2);
@@ -401,6 +417,7 @@ fn main() {
             || has("--brush-panel")
             || has("--eraser-panel")
             || has("--shape-panel")
+            || shape_kind.is_some()
             || brush.is_some()
             || brush_search.is_some()
             || brush_category.is_some()
@@ -441,7 +458,7 @@ fn main() {
                 key(&mut app, 13, false);
                 key(&mut app, 27, false); // Close search and restore the unfiltered categories.
             }
-            if let Some(style) = text_style {
+            if let Some(style) = text_style.or(shape_kind) {
                 chooser_query(&mut app, style);
                 key(&mut app, 13, false);
                 key(&mut app, 27, false);
@@ -460,9 +477,24 @@ fn main() {
                 initial_x
             };
             let items_width = popup_width - 56.;
-            if let Some(i) = brush {
-                let offset =
-                    (i as f32 * 104. - (items_width - 96.) / 2.).clamp(0., 1032. - items_width);
+            let selected_slot = if let Some(query) = shape_kind {
+                let mut browser = Browser::default();
+                browser.set_query(Family::Shapes, query);
+                let result = browser.filtered_ids(Family::Shapes, language.unwrap_or_default());
+                let Some(index) = ShapeKind::ALL
+                    .iter()
+                    .position(|kind| Some(&ItemId::Shape(*kind)) == result.first())
+                else {
+                    eprintln!("No matching shape for --shape-kind.");
+                    std::process::exit(2);
+                };
+                Some((index, 120., ShapeKind::ALL.len()))
+            } else {
+                brush.map(|i| (i, 104., BrushKind::ALL.len()))
+            };
+            if let Some((i, step, count)) = selected_slot {
+                let offset = (i as f32 * step - (items_width - step + 8.) / 2.)
+                    .clamp(0., (count as f32 * step - 8. - items_width).max(0.));
                 chooser_scroll(&mut app, px + 56., 170., offset, 72.);
             }
             // Categories are available while search is closed. Apply them
@@ -506,6 +538,7 @@ fn main() {
                 && !has("--brush-panel")
                 && !has("--eraser-panel")
                 && !has("--shape-panel")
+                && shape_kind.is_none()
                 && brush.is_none()
                 && brush_search.is_none()
                 && brush_category.is_none()
@@ -664,6 +697,13 @@ fn main() {
                 trigger.x + trigger.w * 0.5,
                 trigger.y + trigger.h * 0.5,
             );
+        }
+        if font_menu {
+            let r = app.quick_text_font_rect();
+            click(&mut app, r.x + r.w / 2., r.y + r.h / 2.);
+            if let Some(query) = value("--text-font-search") {
+                app.event(Event::Text(query.to_owned()));
+            }
         }
         let mut frame = app.render();
         for text in &mut frame.texts {
