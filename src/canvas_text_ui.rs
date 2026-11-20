@@ -140,7 +140,6 @@ impl PortfolioApp {
                         y: 0,
                         ..text
                     };
-                    self.inspector_layers = true;
                     self.layer_scroll = 0;
                     if changed {
                         self.changed();
@@ -286,6 +285,7 @@ impl PortfolioApp {
         use ParagraphAlign::*;
         let mut items = vec![
             Action::CloseToolProperties,
+            Action::MoveToolProperties,
             Action::ToolSection(0),
             Action::ToolSection(1),
             Action::ToolSection(2),
@@ -584,7 +584,7 @@ impl PortfolioApp {
 
     pub(super) fn draw_text_header(&mut self, p: &mut Painter, panel: Rect) {
         let text = self.current_text().clone();
-        let preview = Rect::new(panel.x + 94., panel.y + 7., panel.w - 152., 39.);
+        let preview = Rect::new(panel.x + 94., panel.y + 7., panel.w - 182., 39.);
         let ink = text.color;
         let luma =
             0.2126 * f32::from(ink.r) + 0.7152 * f32::from(ink.g) + 0.0722 * f32::from(ink.b);

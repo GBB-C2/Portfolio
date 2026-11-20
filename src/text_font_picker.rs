@@ -11,10 +11,24 @@ pub(super) struct TextFontPicker {
     pub scroll: Scroll,
     fonts: Vec<UiFont>,
     search_focus: bool,
+    search_reveal: Option<Reveal>,
     highlighted: usize,
 }
 
 impl TextFontPicker {
+    pub(super) fn search_animating(&self) -> bool {
+        self.open && self.search_reveal.as_ref().is_some_and(Reveal::active)
+    }
+
+    fn focus_search(&mut self) {
+        self.search_focus = true;
+        self.search_reveal.get_or_insert_with(|| {
+            let mut reveal = Reveal::new(false);
+            reveal.set(true);
+            reveal
+        });
+    }
+
     fn filter_fonts(&mut self) {
         let normalize = |s: &str| {
             s.chars()
@@ -48,8 +62,7 @@ impl PortfolioApp {
         let space_below = self.h() - below - 8.;
         let space_above = anchor.y - 16.;
         let down = space_below >= 238. || space_below >= space_above;
-        let content = (52. + self.font_picker.fonts.len().max(1) as f32 * ROW).min(238.);
-        let h = (if down { space_below } else { space_above }).clamp(1., content);
+        let h = (if down { space_below } else { space_above }).clamp(1., 238.);
         Rect::new(
             anchor.x.clamp(8., (self.w() - width - 8.).max(8.)),
             if down { below } else { anchor.y - h - 8. },
@@ -57,30 +70,22 @@ impl PortfolioApp {
             h,
         )
     }
-    fn font_list_rect(&self) -> Rect {
+    pub(super) fn font_list_rect(&self) -> Rect {
         let panel = self.font_menu_rect();
         Rect::new(
             panel.x + 6.,
-            panel.y + 46.,
-            panel.w - 24.,
-            (panel.h - 52.).max(0.),
+            panel.y + 6.,
+            panel.w - 12.,
+            (panel.h - 48.).max(0.),
         )
     }
-    pub(super) fn font_scroll_track(&self) -> Rect {
+    pub(super) fn font_at(&self, x: f32, y: f32) -> Option<UiFont> {
         let list = self.font_list_rect();
-        Rect::new(list.x + list.w + 2., list.y, 10., list.h)
-    }
-    pub(super) fn font_scroll_thumb(&self) -> Rect {
-        let track = self.font_scroll_track();
-        let scroll = self.font_picker.scroll;
-        let h =
-            (track.h * scroll.viewport / scroll.extent.max(1.)).clamp(20_f32.min(track.h), track.h);
-        let dy = if scroll.max() > 0. {
-            scroll.offset / scroll.max() * (track.h - h)
-        } else {
-            0.
-        };
-        Rect::new(track.x, track.y + dy, track.w, h)
+        if !list.contains(x, y) {
+            return None;
+        }
+        let i = ((y - list.y + self.font_picker.scroll.offset) / ROW).floor() as usize;
+        self.font_picker.fonts.get(i).copied()
     }
     pub(super) fn prepare_font_list(&mut self) {
         let height = self.font_list_rect().h;
@@ -97,7 +102,6 @@ impl PortfolioApp {
         self.font_picker = TextFontPicker {
             open: true,
             fonts: UiFont::ALL.to_vec(),
-            search_focus: true,
             ..Default::default()
         };
         self.font_picker.highlighted = UiFont::ALL
@@ -136,17 +140,112 @@ impl PortfolioApp {
         self.prepare_font_list();
     }
     pub(super) fn font_query_input(&mut self, value: &str) {
+        if !matches!(self.drag, Drag::None) || value.is_empty() {
+            return;
+        }
+        if self.font_picker.search_reveal.is_none() {
+            self.font_picker.focus_search();
+        }
         if self.font_picker.search_focus && self.font_picker.query.insert(value) {
             self.font_query_changed();
         }
     }
+    fn font_search_toggle(&self) -> Rect {
+        let panel = self.font_menu_rect();
+        Rect::new(panel.x + panel.w - 36., panel.y + panel.h - 36., 28., 28.)
+    }
     fn font_search_rect(&self) -> Rect {
         let panel = self.font_menu_rect();
-        Rect::new(panel.x + 8., panel.y + 8., panel.w - 16., 30.)
+        let toggle = self.font_search_toggle();
+        let progress = if self.motion_enabled() {
+            self.font_picker
+                .search_reveal
+                .as_ref()
+                .map_or(0., Reveal::value)
+        } else {
+            1.
+        };
+        let width = toggle.w + (panel.w - 16. - toggle.w) * progress;
+        Rect::new(toggle.x + toggle.w - width, toggle.y, width, toggle.h)
+    }
+    fn font_clear_rect(&self) -> Rect {
+        let toggle = self.font_search_toggle();
+        Rect::new(toggle.x - 26., toggle.y + 2., 24., 24.)
     }
     fn font_query_rect(&self) -> Rect {
         let r = self.font_search_rect();
-        Rect::new(r.x + 28., r.y + 4., r.w - 55., r.h - 8.)
+        let right = if self.font_picker.query.text().is_empty() {
+            self.font_search_toggle().x
+        } else {
+            self.font_clear_rect().x
+        };
+        Rect::new(r.x + 6., r.y + 3., (right - r.x - 8.).max(0.), r.h - 6.)
+    }
+    fn collapse_font_search(&mut self) {
+        self.font_picker.search_reveal = None;
+        self.font_picker.search_focus = false;
+        self.font_picker.query.clear();
+        self.font_query_changed();
+        self.font_picker.highlighted = self
+            .font_picker
+            .fonts
+            .iter()
+            .position(|f| f.key() == self.current_text().font)
+            .unwrap_or(0);
+        self.reveal_font();
+    }
+    fn draw_font_search(&mut self, p: &mut Painter) {
+        let t = Theme::with_accent(self.dark, self.accent);
+        let toggle = self.font_search_toggle();
+        let expanded = self.font_picker.search_reveal.is_some();
+        if expanded {
+            let r = self.font_search_rect();
+            p.clip = p.clip.intersection(r);
+            self.hit_clip = Some(p.clip);
+            p.rounded(r, 4., t.raised);
+            self.control(r, Action::FontQuery, "Поиск шрифта", true);
+            let input = self.font_query_rect();
+            if self.font_picker.query.text().is_empty() && !self.font_picker.search_focus {
+                p.text(
+                    input,
+                    "Поиск шрифта",
+                    12.,
+                    t.muted,
+                    false,
+                    false,
+                    TextAlign::Left,
+                );
+            } else {
+                self.draw_inline_text(
+                    p,
+                    input,
+                    &self.font_picker.query,
+                    self.font_picker.search_focus,
+                );
+            }
+            if !self.font_picker.query.text().is_empty() {
+                self.flat_search_button(
+                    p,
+                    self.font_clear_rect(),
+                    Action::ClearFontQuery,
+                    "close",
+                    "Очистить поиск",
+                    false,
+                );
+            }
+        }
+        self.flat_search_button(
+            p,
+            toggle,
+            Action::ToggleFontSearch,
+            "search",
+            if expanded {
+                "Закрыть поиск"
+            } else {
+                "Поиск шрифта"
+            },
+            expanded,
+        );
     }
 
     pub(super) fn draw_text_fonts(&mut self, p: &mut Painter) {
@@ -156,55 +255,6 @@ impl PortfolioApp {
         let t = Theme::with_accent(self.dark, self.accent);
         self.occlude_underlying_surface(p, panel);
         self.floating_surface(p, panel, "Выбор шрифта");
-        p.clip = panel.inset(1.);
-        self.hit_clip = Some(p.clip);
-        let search = self.font_search_rect();
-        p.rounded(
-            search,
-            4.,
-            if self.font_picker.search_focus {
-                t.accent
-            } else {
-                t.border
-            },
-        );
-        p.rounded(search.inset(1.), 3., t.raised);
-        p.icon(
-            Rect::new(search.x + 3., search.y, 23., search.h),
-            "search",
-            t.muted,
-        );
-        self.control(search, Action::FontQuery, "Поиск шрифта", true);
-        let input = self.font_query_rect();
-        if self.font_picker.query.text().is_empty() {
-            p.text(
-                Rect::new(input.x + 3., input.y, input.w - 3., input.h),
-                "Поиск шрифта",
-                12.,
-                t.muted,
-                false,
-                false,
-                TextAlign::Left,
-            );
-        }
-        self.draw_inline_text(
-            p,
-            input,
-            &self.font_picker.query,
-            self.font_picker.search_focus,
-        );
-        if !self.font_picker.query.text().is_empty() {
-            self.icon_button(
-                p,
-                Rect::new(search.x + search.w - 26., search.y + 3., 24., 24.),
-                Action::ClearFontQuery,
-                "close",
-                "Очистить поиск",
-                false,
-                true,
-            );
-        }
-
         p.clip = list;
         self.hit_clip = Some(list);
         if self.font_picker.fonts.is_empty() {
@@ -271,13 +321,7 @@ impl PortfolioApp {
         p.font = ui;
         p.clip = panel.inset(1.);
         self.hit_clip = Some(p.clip);
-        let track = self.font_scroll_track();
-        if self.font_picker.scroll.max() > 0. {
-            p.rounded(Rect::new(track.x + 3., track.y, 4., track.h), 2., t.raised);
-            let thumb = self.font_scroll_thumb();
-            p.rounded(Rect::new(thumb.x + 2., thumb.y, 6., thumb.h), 3., t.muted);
-            self.control(track, Action::FontListScroll, "Прокрутка шрифтов", true);
-        }
+        self.draw_font_search(p);
         self.hit_clip = None;
         p.clip = Rect::new(0., 0., self.w(), self.h());
     }
@@ -296,10 +340,17 @@ impl PortfolioApp {
             self.close_text_fonts(out);
             return;
         }
-        if self.font_search_rect().contains(x, y) {
-            self.font_picker.search_focus = true;
-            let search = self.font_search_rect();
-            if x > search.x + search.w - 26. && !self.font_picker.query.text().is_empty() {
+        if self.font_search_toggle().contains(x, y) {
+            if self.font_picker.search_reveal.is_some() {
+                self.collapse_font_search();
+            } else {
+                self.font_picker.focus_search();
+            }
+            return;
+        }
+        if self.font_picker.search_reveal.is_some() && self.font_search_rect().contains(x, y) {
+            self.font_picker.focus_search();
+            if self.font_clear_rect().contains(x, y) && !self.font_picker.query.text().is_empty() {
                 self.font_picker.query.clear();
                 self.font_query_changed();
             } else {
@@ -310,31 +361,17 @@ impl PortfolioApp {
             return;
         }
         self.prepare_font_list();
-        if self.font_scroll_track().contains(x, y) && self.font_picker.scroll.max() > 0. {
-            let thumb = self.font_scroll_thumb();
-            let grab = if thumb.contains(x, y) {
-                y - thumb.y
-            } else {
-                thumb.h / 2.
-            };
-            self.drag = Drag::VerticalScroll {
-                surface: ScrollSurface::DocumentFonts,
-                initial: self.font_picker.scroll.offset,
-                grab,
-            };
-            self.update_drag(x, y, m);
-            return;
-        }
-        let list = self.font_list_rect();
-        if list.contains(x, y) {
-            let index = ((y - list.y + self.font_picker.scroll.offset) / ROW).floor() as usize;
-            self.choose_text_font(index, out);
+        if self.font_list_rect().contains(x, y) {
+            let pending = self.font_at(x, y).map(Action::DocumentFont);
+            self.begin_list_drag(ScrollList::Fonts, x, y, pending);
         }
     }
     pub(super) fn text_fonts_key(&mut self, code: u32, m: Modifiers, out: &mut Vec<Effect>) {
         if code == 27 {
             if !matches!(self.drag, Drag::None) {
                 self.cancel_drag();
+            } else if self.font_picker.search_reveal.is_some() {
+                self.collapse_font_search();
             } else {
                 self.close_text_fonts(out);
             }
@@ -344,12 +381,16 @@ impl PortfolioApp {
             return;
         }
         if m.ctrl && code == 70 {
-            self.font_picker.search_focus = true;
+            self.font_picker.focus_search();
             self.font_picker.query.select_all();
             return;
         }
         if matches!(code, 9 | 117) {
-            self.font_picker.search_focus = !self.font_picker.search_focus;
+            if self.font_picker.search_focus {
+                self.font_picker.search_focus = false;
+            } else {
+                self.font_picker.focus_search();
+            }
             self.reveal_font();
             return;
         }

@@ -88,7 +88,7 @@ fn color_prompt(app: &mut PortfolioApp) -> (u32, String) {
         .texts
         .iter()
         .find(|run| Color::parse_hex(&run.text).is_some())
-        .expect("the color inspector exposes its current HEX value");
+        .expect("the color wheel exposes its current HEX value");
     prompt_at(
         app,
         readout.x + readout.width * 0.5,
@@ -355,6 +355,12 @@ fn a_dirty_document_is_protected_when_new_is_requested() {
 fn canceled_and_invalid_color_and_numeric_prompts_keep_existing_values() {
     let mut app = app();
     let before = app.doc.to_bytes().unwrap();
+    let trigger = app.color_trigger();
+    click(
+        &mut app,
+        trigger.x + trigger.w / 2.,
+        trigger.y + trigger.h / 2.,
+    );
     let (color_id, color) = color_prompt(&mut app);
     app.event(Event::Prompted {
         id: color_id,
@@ -372,6 +378,7 @@ fn canceled_and_invalid_color_and_numeric_prompts_keep_existing_values() {
         value: None,
     });
 
+    key(&mut app, 27, false, false);
     let (size_id, size) = size_prompt(&mut app);
     for invalid in ["NaN", "513", "-1", "not a number"] {
         assert!(has_error(&app.event(Event::Prompted {

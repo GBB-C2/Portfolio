@@ -4,6 +4,7 @@ use super::*;
 
 #[derive(Default)]
 pub(super) struct ToolPropertiesUi {
+    pub position: Option<(f32, f32)>,
     pub name_edit: Option<crate::tool_browser::SearchText>,
     pub active_section: [u8; 5],
     pub scrolls: [[crate::tool_browser::Scroll; 3]; 5],
@@ -108,6 +109,14 @@ impl PortfolioApp {
     }
 
     pub(super) fn tool_settings_rect(&self) -> Rect {
+        let mut rect = self.default_tool_settings_rect();
+        if let Some(position) = self.tool_properties_ui.position {
+            (rect.x, rect.y) = self.constrain_panel_position(position, (rect.w, rect.h));
+        }
+        rect
+    }
+
+    fn default_tool_settings_rect(&self) -> Rect {
         let left = 16.;
         let width = (self.w() - 336.)
             .clamp(360., 448.)
@@ -309,7 +318,7 @@ impl PortfolioApp {
             return true;
         }
         match action {
-            Action::CloseToolProperties => return true,
+            Action::CloseToolProperties | Action::MoveToolProperties => return true,
             Action::RenameBrush | Action::AddBrush | Action::ResetBrush => {
                 return self.tool_settings_brushes()
             }
@@ -377,7 +386,7 @@ impl PortfolioApp {
         if self.tool == Tool::Text {
             return self.text_focus_order();
         }
-        let mut actions = vec![Action::CloseToolProperties];
+        let mut actions = vec![Action::CloseToolProperties, Action::MoveToolProperties];
         if self.tool_settings_brushes() {
             actions.extend([Action::RenameBrush, Action::AddBrush]);
         }
@@ -399,6 +408,7 @@ impl PortfolioApp {
                 matches!(
                     action,
                     Action::CloseToolProperties
+                        | Action::MoveToolProperties
                         | Action::ToolPropertiesScroll
                         | Action::ToolSection(_)
                 )
@@ -466,8 +476,21 @@ impl PortfolioApp {
         self.floating_surface(p, panel, "Параметры инструмента");
         p.clip = panel.inset(1.);
         self.hit_clip = Some(p.clip);
+        let header = Rect::new(panel.x + 8., panel.y + 8., panel.w - 58., 32.);
+        self.control(
+            header,
+            Action::MoveToolProperties,
+            "Переместить панель · стрелки / Home",
+            true,
+        );
+        let grip = Rect::new(header.x + header.w - 28., header.y, 28., header.h);
+        if self.focus == Some(self.controls.len().saturating_sub(1)) {
+            p.rounded(grip, 4., t.accent);
+            p.rounded(grip.inset(1.), 3., t.surface);
+        }
+        p.icon(grip, "grip", t.muted);
         p.text(
-            Rect::new(panel.x + 20., panel.y + 12., panel.w - 84., 32.),
+            Rect::new(panel.x + 20., panel.y + 12., panel.w - 112., 32.),
             self.tool_properties_title(),
             21.,
             t.text,
@@ -621,7 +644,7 @@ impl PortfolioApp {
     fn preset_sample_rect(&self) -> Rect {
         let panel = self.tool_settings_rect();
         let width = (panel.w * 0.26).clamp(72., 112.);
-        Rect::new(panel.x + panel.w - 54. - width, panel.y + 24., width, 40.)
+        Rect::new(panel.x + panel.w - 84. - width, panel.y + 24., width, 40.)
     }
 
     pub(super) fn preset_name_rect(&self) -> Rect {
